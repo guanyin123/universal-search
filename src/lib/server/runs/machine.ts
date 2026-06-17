@@ -66,6 +66,7 @@ export async function runPlan(
 
   try {
     const evidence: Evidence[] = [];
+    const seenUrls = new Set<string>();
     const sources = editedPlan.dimensions
       .filter((d) => d.enabled)
       .flatMap((d) => d.sources)
@@ -76,6 +77,10 @@ export async function runPlan(
       try {
         const results = await deps.web.run(src.query);
         for (const r of results) {
+          // Dedup by URL BEFORE the expensive extract+compress — multiple queries
+          // may surface the same page; never pay Jina/LLM for it twice.
+          if (seenUrls.has(r.url)) continue;
+          seenUrls.add(r.url);
           const md = await deps.extract(r.url);
           const compressed = await deps.llm.complete({
             role: 'fanout',
@@ -97,13 +102,7 @@ export async function runPlan(
       }
     }
 
-    // Deduplicate by URL — multiple queries may surface the same page.
-    const seen = new Set<string>();
-    run.evidence = evidence.filter((e) => {
-      if (seen.has(e.url)) return false;
-      seen.add(e.url);
-      return true;
-    });
+    run.evidence = evidence;
     run.status = 'synthesizing';
     await deps.store.save(run);
     bus.emit(runId, { phase: 'synthesizing' });
