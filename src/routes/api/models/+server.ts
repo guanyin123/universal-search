@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getConfig } from '$lib/server/config';
+import { getConfig } from '$lib/server/runtime-config';
 import { listModels } from '$lib/server/llm/models';
 
 export async function GET() {

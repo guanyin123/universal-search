@@ -1,4 +1,4 @@
-import { getConfig } from '../config';
+import { getConfig } from '../runtime-config';
 import { makeLlm, type Llm } from '../llm/client';
 import { makeTavilyRunner } from '../search/tavily';
 import { makeJinaExtractor } from '../search/jina';

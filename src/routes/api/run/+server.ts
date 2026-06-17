@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { getConfig } from '$lib/server/config';
+import { getConfig } from '$lib/server/runtime-config';
 import { realDeps } from '$lib/server/runs/deps';
 import { bus } from '$lib/server/events';
 import { startRun } from '$lib/server/runs/machine';

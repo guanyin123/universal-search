@@ -38,9 +38,13 @@ export function loadConfig(env: Env = process.env): AppConfig {
 }
 
 let cached: AppConfig | null = null;
-/** Lazily load + cache from process.env for use in route handlers. */
-export function getConfig(): AppConfig {
-  if (!cached) cached = loadConfig();
+/**
+ * Lazily load + cache config. Pure: caller supplies the env source.
+ * Runtime callers go through runtime-config.ts (which passes SvelteKit's
+ * `$env/dynamic/private`); tests pass process.env or an explicit record.
+ */
+export function getConfig(env: Env = process.env): AppConfig {
+  if (!cached) cached = loadConfig(env);
   return cached;
 }
 
