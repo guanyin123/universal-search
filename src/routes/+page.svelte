@@ -12,6 +12,8 @@
   let models = $state<{ models: string[]; defaults: { fanout: string; synth: string } } | null>(null);
   let fanoutModel = $state('');
   let synthModel = $state('');
+  let depositing = $state(false);
+  let es: EventSource | null = null;
 
   async function loadModels() {
     const r = await fetch('/api/models');
@@ -22,20 +24,35 @@
   loadModels();
 
   function listen(id: string) {
-    const es = new EventSource(`/api/run/${id}/stream`);
+    es?.close();
+    es = new EventSource(`/api/run/${id}/stream`);
     es.onmessage = (m) => {
       const e = JSON.parse(m.data);
       if (e.phase === 'heartbeat') return;
+      // once done, ignore any late error (e.g. a double-clicked deposit) so a
+      // succeeded run isn't visually downgraded to "error".
+      if (phase === 'done') return;
       phase = e.phase;
       if (e.phase === 'awaiting_edit') plan = e.plan;
       else if (e.phase === 'querying') log = [...log, `${e.status}: ${e.title ?? e.sourceId}`];
       else if (e.phase === 'awaiting_deposit') markdown = e.markdown;
-      else if (e.phase === 'done') { reportPath = e.reportPath; es.close(); }
-      else if (e.phase === 'error') { log = [...log, `ERROR: ${e.message}`]; es.close(); }
+      else if (e.phase === 'done') { reportPath = e.reportPath; es?.close(); }
+      else if (e.phase === 'error') { log = [...log, `ERROR: ${e.message}`]; es?.close(); }
     };
   }
 
   async function start() {
+    // reset everything from any previous run (and close its SSE)
+    es?.close();
+    es = null;
+    runId = null;
+    plan = null;
+    markdown = '';
+    reportPath = '';
+    log = [];
+    depositing = false;
+    phase = 'proposing';
+
     const r = await fetch('/api/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -51,6 +68,8 @@
 
   async function runIt() {
     log = [];
+    markdown = '';
+    reportPath = '';
     await fetch(`/api/run/${runId}/plan`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -59,6 +78,8 @@
   }
 
   async function deposit() {
+    if (depositing) return;
+    depositing = true;
     await fetch(`/api/run/${runId}/deposit`, { method: 'POST' });
   }
 
@@ -113,7 +134,7 @@
   {#if markdown && phase === 'awaiting_deposit'}
     <h2>报告预览</h2>
     <pre style="white-space:pre-wrap; background:#f6f6f6; padding:1rem;">{markdown}</pre>
-    <button onclick={deposit}>确认沉淀进第二大脑 →</button>
+    <button onclick={deposit} disabled={depositing}>{depositing ? '沉淀中…' : '确认沉淀进第二大脑 →'}</button>
   {/if}
 
   {#if phase === 'done'}

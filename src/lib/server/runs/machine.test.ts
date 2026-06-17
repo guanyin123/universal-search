@@ -51,7 +51,7 @@ describe('runPlan', () => {
     bus.subscribe(run0.id, (e) => phases.push(e.phase));
 
     (deps.llm.complete as any).mockImplementation(async ({ role, prompt }: any) => {
-      if (role === 'synth' && /tags/i.test(prompt)) return '["RAG","AI"]';
+      if (/tags/i.test(prompt)) return '["RAG","AI"]';
       if (role === 'synth') return '# Q\n> answer\n## 核心发现\n- x [1] (置信度: 中)\n## 来源\n[1] A';
       return '- compressed';
     });
@@ -91,5 +91,22 @@ describe('runPlan', () => {
     const run = await runPlan(run0.id, run0.plan, deps, bus);
     expect(run.evidence).toHaveLength(1);
     expect(extract).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts with an error when every source fails (never synthesizes empty evidence)', async () => {
+    const bus = makeEventBus();
+    const deps = fakeDeps({
+      web: {
+        dimension: 'web',
+        api: 'tavily',
+        run: vi.fn(async () => {
+          throw new Error('search down');
+        })
+      } as any
+    });
+    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    expect(run.status).toBe('error');
+    expect(run.evidence).toHaveLength(0);
   });
 });

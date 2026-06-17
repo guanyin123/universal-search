@@ -102,6 +102,12 @@ export async function runPlan(
       }
     }
 
+    // Never synthesize from nothing: if every source failed (search/extract/compress),
+    // abort loudly instead of letting the strong model fabricate a sourceless report
+    // that the user might confirm into the vault.
+    if (evidence.length === 0) {
+      throw new Error('所有检索源均失败或无可用内容，已中止以避免生成无来源的报告。');
+    }
     run.evidence = evidence;
     run.status = 'synthesizing';
     await deps.store.save(run);
@@ -119,8 +125,9 @@ export async function runPlan(
     let tags: string[] = [];
     try {
       const tagRaw = await deps.llm.complete({
-        role: 'synth',
-        model: run.models.synth,
+        // tags is a cheap extraction task → fanout (cheap) model, not synth.
+        role: 'fanout',
+        model: run.models.fanout,
         // vocab is empty in v1; biasing tag reuse from existing vault tags is a v2 item
         // (same deferral as related[] auto-linking, per the spec §15 decisions).
         prompt: buildTagsPrompt(run.question, [])
