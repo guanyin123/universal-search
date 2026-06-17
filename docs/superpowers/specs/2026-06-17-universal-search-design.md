@@ -198,7 +198,7 @@ JINA_API_KEY=            # 留空走免费档
 6. `depositing`：vault writer + 七道安全闸 + autocommit；列计划→确认。
 7. 测试（§12）+ 手动端到端冒烟。
 
-## 15. 仍待确认（写实现计划前）
-- `o4-mini` 等具体默认模型名，是否就用上面 env 示例值（你也可在 UI 现选）。
-- `tags` 生成策略：让强模型产出标签，还是固定一组 + 模型补充。
-- `related[]` 是否在 v1 自动关联 vault 既有页面（需读 `index.md`），还是先留空交给你手动补。
+## 15. 已定决策（2026-06-17 确认）
+- **默认模型名**：env 默认 `FANOUT_MODEL=gpt-4o-mini` / `SYNTH_MODEL=gpt-4o`，运行前可在 UI 现切。
+- **`tags` 生成**：由强模型产出 3–7 个标签，尽量复用 vault 既有标签词汇。
+- **`related[]` 自动关联**：v1 先留空/最简，自动关联 vault 既有页面（需读 `index.md`）放 v2。
