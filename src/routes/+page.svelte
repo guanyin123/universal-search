@@ -68,6 +68,10 @@
     runId = data.id;
     plan = data.plan;
     phase = data.status;
+    if (data.status === 'error') {
+      log = [...log, `ERROR: ${data.error ?? '启动失败'}`];
+      return;
+    }
     listen(data.id);
   }
 

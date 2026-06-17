@@ -21,5 +21,7 @@ export async function POST({ request }) {
     realDeps(),
     bus
   );
-  return json({ id: run.id, status: run.status, plan: run.plan });
+  // include error so the UI can show WHY proposing failed — that error event fires
+  // during this POST, before the client's SSE connects, so it'd otherwise be lost.
+  return json({ id: run.id, status: run.status, plan: run.plan, error: run.error?.message ?? null });
 }
