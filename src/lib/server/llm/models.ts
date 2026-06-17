@@ -9,11 +9,15 @@ export async function listModels(
     const res = await fetchFn(`${cfg.baseURL.replace(/\/$/, '')}/models`, {
       headers: { Authorization: `Bearer ${cfg.apiKey}` }
     });
-    if (!res.ok) return cfg.models;
+    if (!res.ok) {
+      console.warn(`[listModels] provider /models returned ${res.status}; falling back to configured models`);
+      return cfg.models;
+    }
     const body = (await res.json()) as { data?: Array<{ id: string }> };
     const ids = (body.data ?? []).map((m) => m.id).filter(Boolean);
     return ids.length ? ids : cfg.models;
-  } catch {
+  } catch (err) {
+    console.warn('[listModels] falling back to configured models:', err instanceof Error ? err.message : err);
     return cfg.models;
   }
 }

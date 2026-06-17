@@ -1,4 +1,4 @@
-import { generateText, streamText } from 'ai';
+import { generateText, streamText, type LanguageModel } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { AppConfig } from '../config';
 
@@ -14,21 +14,23 @@ export interface CompleteArgs {
 
 interface Deps {
   generate: typeof generateText;
-  provider: (modelId: string) => any;
+  stream: typeof streamText;
+  provider: (modelId: string) => LanguageModel;
 }
 
 export function makeLlm(cfg: LlmConfig, deps?: Partial<Deps>) {
   const provider =
     deps?.provider ??
     createOpenAICompatible({ name: 'llm', baseURL: cfg.baseURL, apiKey: cfg.apiKey });
-  const generate = deps?.generate ?? generateText;
+  const generateFn = deps?.generate ?? generateText;
+  const streamFn = deps?.stream ?? streamText;
 
   const resolve = (role: Role, override?: string) =>
     override ?? (role === 'fanout' ? cfg.fanoutModel : cfg.synthModel);
 
   return {
     async complete(args: CompleteArgs): Promise<string> {
-      const { text } = await generate({
+      const { text } = await generateFn({
         model: provider(resolve(args.role, args.model)),
         system: args.system,
         prompt: args.prompt
@@ -36,7 +38,7 @@ export function makeLlm(cfg: LlmConfig, deps?: Partial<Deps>) {
       return text;
     },
     stream(args: CompleteArgs) {
-      const result = streamText({
+      const result = streamFn({
         model: provider(resolve(args.role, args.model)),
         system: args.system,
         prompt: args.prompt

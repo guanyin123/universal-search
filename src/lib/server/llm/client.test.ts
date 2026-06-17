@@ -28,3 +28,15 @@ describe('makeLlm.complete', () => {
     expect(fakeGenerate.mock.calls[0][0].model.id).toBe('o4-mini');
   });
 });
+
+describe('makeLlm.stream', () => {
+  it('resolves role "synth" to synthModel and returns the textStream', () => {
+    const textStream = (async function* () { yield 'a'; })();
+    const fakeStream = vi.fn().mockReturnValue({ textStream });
+    const llm = makeLlm(cfg, { stream: fakeStream as any, provider: (id: string) => ({ id }) as any });
+    const out = llm.stream({ role: 'synth', prompt: 'P' });
+    expect(fakeStream.mock.calls[0][0].model.id).toBe('gpt-4o');
+    expect(fakeStream.mock.calls[0][0].prompt).toBe('P');
+    expect(out).toBe(textStream);
+  });
+});
