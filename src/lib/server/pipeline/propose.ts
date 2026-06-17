@@ -19,5 +19,9 @@ export function parseProposedQueries(raw: string): string[] {
     throw new Error(`Could not parse query array (invalid JSON): ${match[0].slice(0, 120)}`);
   }
   if (!Array.isArray(arr)) throw new Error('Parsed value is not an array');
-  return arr.map((x) => String(x).trim()).filter(Boolean).slice(0, 3);
+  const queries = arr.map((x) => String(x).trim()).filter(Boolean).slice(0, 3);
+  if (queries.length === 0) {
+    throw new Error('Could not parse query array: model returned no usable queries');
+  }
+  return queries;
 }

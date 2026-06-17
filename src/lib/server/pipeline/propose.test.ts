@@ -23,4 +23,8 @@ describe('parseProposedQueries', () => {
   it('throws when no array can be found', () => {
     expect(() => parseProposedQueries('no json here')).toThrow(/parse/i);
   });
+  it('throws when the array yields no usable queries', () => {
+    expect(() => parseProposedQueries('[]')).toThrow(/no usable queries/i);
+    expect(() => parseProposedQueries('["", "  "]')).toThrow(/no usable queries/i);
+  });
 });

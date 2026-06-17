@@ -8,6 +8,10 @@ describe('buildCompressPrompt', () => {
     expect(p).toContain('Title');
     expect(p).toContain('long content here');
   });
+  it('truncates overly long content inside the prompt', () => {
+    const p = buildCompressPrompt('Q?', 'Title', 'x'.repeat(20000));
+    expect(p).toContain('…[truncated]');
+  });
 });
 
 describe('truncateForBudget', () => {

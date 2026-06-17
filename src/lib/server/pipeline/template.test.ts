@@ -17,4 +17,14 @@ describe('buildSynthesisPrompt', () => {
     expect(p).toContain('[1]');
     expect(p).toContain('https://a.com');
   });
+  it('numbers multiple evidence items incrementally', () => {
+    const two: Evidence[] = [
+      { sourceId: 's1', url: 'https://a.com', title: 'A', compressed: '- a', retrievedAt: '2026-06-17' },
+      { sourceId: 's2', url: 'https://b.com', title: 'B', compressed: '- b', retrievedAt: '2026-06-17' }
+    ];
+    const p = buildSynthesisPrompt('Q?', two);
+    expect(p).toContain('[1]');
+    expect(p).toContain('[2]');
+    expect(p).toContain('https://b.com');
+  });
 });

@@ -7,7 +7,7 @@ describe('tags', () => {
     expect(p).toContain('什么是 RAG');
     expect(p).toContain('AI');
   });
-  it('parseTags reads a JSON array and clamps to 3-7', () => {
+  it('parseTags reads a JSON array and clamps to max 7', () => {
     expect(parseTags('["a","b","c","d"]')).toEqual(['a', 'b', 'c', 'd']);
     expect(parseTags('["a","b","c","d","e","f","g","h","i"]').length).toBe(7);
   });
