@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   type Source = { id: string; api: string; query: string; enabled: boolean };
   type Plan = { dimensions: { key: string; label: string; enabled: boolean; sources: Source[] }[] };
 
@@ -21,7 +23,10 @@
     fanoutModel = models!.defaults.fanout;
     synthModel = models!.defaults.synth;
   }
-  loadModels();
+  // browser-only: relative-URL fetch is forbidden during SSR, so defer to mount
+  onMount(() => {
+    loadModels();
+  });
 
   function listen(id: string) {
     es?.close();
