@@ -18,6 +18,9 @@ Thumbs.db
 !.env.example
 !.env.test
 
+# Local run artifacts
+.runs/
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
