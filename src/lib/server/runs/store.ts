@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import type { Run, RunStatus } from './types';
 
 export interface RunSummary {
@@ -16,7 +17,7 @@ export function makeRunStore(dir: string) {
   return {
     async save(run: Run): Promise<void> {
       await ensure();
-      const tmp = join(dir, `${run.id}.${Date.now()}.tmp`);
+      const tmp = join(dir, `${run.id}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`);
       await writeFile(tmp, JSON.stringify(run, null, 2), 'utf8');
       await rename(tmp, file(run.id)); // atomic on same filesystem
     },
@@ -45,7 +46,7 @@ export function makeRunStore(dir: string) {
       );
       return runs
         .filter((r): r is RunSummary => r !== null)
-        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     }
   };
 }

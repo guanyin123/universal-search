@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeRunStore } from './store';
@@ -44,5 +44,11 @@ describe('makeRunStore', () => {
   it('get returns null for missing id', async () => {
     const store = makeRunStore(dir);
     expect(await store.get('nope')).toBeNull();
+  });
+
+  it('get rethrows on corrupt JSON (distinct from missing)', async () => {
+    const store = makeRunStore(dir);
+    await writeFile(join(dir, 'bad.json'), '{ not valid }', 'utf8');
+    await expect(store.get('bad')).rejects.toThrow();
   });
 });
