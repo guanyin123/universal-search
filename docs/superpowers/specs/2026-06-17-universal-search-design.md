@@ -4,7 +4,8 @@
 - **状态**: Draft（待用户审阅）
 - **项目路径**: `/Users/admin/ai-developer/universal-search`
 - **第二大脑（沉淀目标）**: `/Users/admin/Documents/ObsidianVault`
-- **设计来源**: brainstorming 会话 + 一轮 `+100k` 调研工作流（8 个 Haiku 铺广度 → Opus 收口）
+- **设计来源**: brainstorming 会话 + 一轮 `+100k` 调研工作流（8 Haiku 铺广度 → Opus 收口）+ 一轮技术栈对抗评审工作流（8 环节 × scout/守/攻/裁判，33 agent；2026-06-17）
+- **技术栈评审结论**: 8 环节仅 1 处更换（应用框架 Next.js → **SvelteKit 2.64**），其余 7 处原方案胜出；另吸收 2 处硬化（run 持久化原子写、LLM 层用 `@ai-sdk/openai-compatible`）
 
 ---
 
@@ -50,12 +51,13 @@
 ## 5. 架构总览
 
 ### 5.1 技术栈
-- **Next.js（App Router，Node runtime —— 非 Edge，因需 `node:fs` 与本地网络）**，TypeScript，本地 `npm run dev` 启动。**Node 服务进程是唯一能访问 vault 的实体。**
-- 模型层：**Vercel AI SDK**（`ai` + `@ai-sdk/openai`，可选 `@ai-sdk/anthropic`）。统一 `generateText` / `streamText`，切换 provider 仅改配置。
+- **SvelteKit 2.64（`adapter-node`，Node runtime —— 因需 `node:fs`、本地网络与 git）**，TypeScript，本地 `npm run dev` 启动。**Node 服务进程（`+server.js`）是唯一能访问 vault 的实体。** 选型经 2026-06-17 对抗评审：与 Next.js 在硬需求上等价，但单 `+server.js` 心智模型 + 更小依赖面更贴合「别过度复杂化」（8.10 vs 7.75）。
+- 模型层：**Vercel AI SDK**（服务端核心 `ai` + **`@ai-sdk/openai-compatible`** 做 `base_url`/`api_key` 切换；可选 `@ai-sdk/anthropic`）。统一 `generateText` / `streamText`，切 provider 仅改配置。**仅在 SvelteKit 服务端 import，绝不让 `@ai-sdk/svelte` 等 UI 包漏进前端 bundle。**
 - 搜索层（MVP）：**Tavily**（web 检索）+ **Jina Reader**（`r.jina.ai`，URL→markdown）。
 - 沉淀层：自研 vault writer，镜像 `/ingest` 的 schema 与安全规则。
 - 编排：**不引入 LangGraph**。自研服务端**运行状态机**，状态落盘 `.runs/<id>.json`（可断点续跑）。
 - 进度：**SSE**（`text/event-stream`）。
+- 支撑库：UI 用 SvelteKit 内置 Svelte 组件（不加组件库）；测试 **Vitest**（Vite 原生）；vault git 自动提交用 **simple-git**。
 
 ### 5.2 模型层（provider 无关 + 模型选择）
 - 配置：`LLM_BASE_URL` / `LLM_API_KEY` + 角色化模型 `FANOUT_MODEL`（便宜）、`SYNTH_MODEL`（强）。
@@ -66,7 +68,7 @@
 ### 5.3 运行状态机
 状态：`proposing → awaiting_edit → searching → synthesizing → awaiting_deposit → depositing → done | error`
 
-`Run` 对象（落盘 `.runs/<id>.json`）：
+`Run` 对象（落盘 `.runs/<id>.json`，**原子写：先写 `.tmp` 再 `rename`**，防掉电/强退损坏；读写经 `saveRun/getRun/queryRuns` 抽象，未来要查询历史可平滑换 better-sqlite3）：
 ```ts
 interface Run {
   id: string
@@ -102,7 +104,7 @@ interface Run {
 问题 → cheap 模型产出 2–3 条 Tavily 查询 → 用户编辑 → 并行执行 Tavily → 每个结果 URL 过 Jina Reader 得 markdown → cheap 模型**逐源压缩**（控成本）→ 强模型用默认模板**综合报告** → 列文件计划 → 确认 → 写 `wiki/synthesis/<slug>.md` + `raw/research/<date>-<slug>/` → git autocommit。
 
 ### 5.6 进度流（SSE）
-事件类型：`{phase:'proposing'}` · `{phase:'querying', source, status}` · `{phase:'synthesizing', token?}` · `{phase:'plan', files}` · `{phase:'done'}` · `{phase:'error', message}`；每 ~15s 发 heartbeat 防代理超时。前端 `EventSource` 消费，按事件更新 React 状态。
+事件类型：`{phase:'proposing'}` · `{phase:'querying', source, status}` · `{phase:'synthesizing', token?}` · `{phase:'plan', files}` · `{phase:'done'}` · `{phase:'error', message}`；每 ~15s 发 heartbeat 防代理超时。前端 `EventSource` 消费，按事件更新 Svelte 状态（runes/stores）。SSE 自带断连重连 + `Last-Event-ID`，多分钟长跑断线可续。
 
 ## 6. 搜索层（适配器接口，为 v2 预留）
 ```ts
