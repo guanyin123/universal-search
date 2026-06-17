@@ -22,4 +22,10 @@ describe('makeJinaExtractor', () => {
     const extract = makeJinaExtractor(undefined, fetchFn as any);
     expect(await extract('https://e.com')).toBe('');
   });
+
+  it('returns empty string when fetch itself rejects (network error)', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('network failure'));
+    const extract = makeJinaExtractor(undefined, fetchFn as any);
+    expect(await extract('https://e.com')).toBe('');
+  });
 });

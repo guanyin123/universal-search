@@ -21,7 +21,16 @@ describe('makeTavilyRunner', () => {
     ]);
     const [url, init] = fetchFn.mock.calls[0];
     expect(url).toBe('https://api.tavily.com/search');
-    expect(JSON.parse(init.body).query).toBe('hello');
+    expect(init.method).toBe('POST');
+    expect(init.headers.Authorization).toBe('Bearer tvly-x');
+    expect(init.headers['content-type']).toBe('application/json');
+    const sent = JSON.parse(init.body);
+    expect(sent).toMatchObject({
+      query: 'hello',
+      search_depth: 'basic',
+      max_results: 5,
+      include_answer: false
+    });
   });
 
   it('throws a descriptive error on non-ok response', async () => {
