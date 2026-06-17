@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { loadConfig } from './config';
+import { describe, it, expect, afterEach } from 'vitest';
+import { loadConfig, getConfig, resetConfigCache } from './config';
 
 const base = {
   VAULT_ROOT: '/tmp/vault',
@@ -28,5 +28,27 @@ describe('loadConfig', () => {
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);
+  });
+});
+
+describe('getConfig cache', () => {
+  afterEach(() => resetConfigCache());
+
+  it('caches across calls and resetConfigCache clears it', () => {
+    const prev = { ...process.env };
+    process.env.VAULT_ROOT = '/tmp/v1';
+    process.env.LLM_BASE_URL = 'https://api.openai.com/v1';
+    process.env.LLM_API_KEY = 'sk';
+    process.env.FANOUT_MODEL = 'f';
+    process.env.SYNTH_MODEL = 's';
+    process.env.TAVILY_API_KEY = 't';
+    resetConfigCache();
+    const a = getConfig();
+    const b = getConfig();
+    expect(a).toBe(b); // same cached instance
+    resetConfigCache();
+    const c = getConfig();
+    expect(c).not.toBe(a); // fresh instance after reset
+    Object.assign(process.env, prev);
   });
 });

@@ -43,3 +43,8 @@ export function getConfig(): AppConfig {
   if (!cached) cached = loadConfig();
   return cached;
 }
+
+/** Test-only: clear the cached config so a fresh getConfig() re-reads process.env. */
+export function resetConfigCache(): void {
+  cached = null;
+}
