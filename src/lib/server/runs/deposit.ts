@@ -8,6 +8,10 @@ export async function depositRun(runId: string, deps: MachineDeps, bus: EventBus
   const run = await deps.store.get(runId);
   if (!run) throw new Error(`run not found: ${runId}`);
   if (!run.depositPlan) throw new Error('run has no deposit plan');
+  // Idempotency: never re-commit a finished run; never race a concurrent deposit.
+  // ('error' is allowed so a failed deposit — e.g. dirty vault — can be retried.)
+  if (run.status === 'done') throw new Error(`run ${runId} already deposited`);
+  if (run.status === 'depositing') throw new Error(`run ${runId} deposit already in progress`);
 
   run.status = 'depositing';
   await deps.store.save(run);

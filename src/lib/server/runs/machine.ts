@@ -121,6 +121,8 @@ export async function runPlan(
       const tagRaw = await deps.llm.complete({
         role: 'synth',
         model: run.models.synth,
+        // vocab is empty in v1; biasing tag reuse from existing vault tags is a v2 item
+        // (same deferral as related[] auto-linking, per the spec §15 decisions).
         prompt: buildTagsPrompt(run.question, [])
       });
       tags = parseTags(tagRaw);
@@ -144,7 +146,7 @@ export async function runPlan(
     bus.emit(runId, { phase: 'awaiting_deposit', files: depositPlan.files, markdown });
     return run;
   } catch (err: any) {
-    return fail(run, 'synthesizing', err, deps, bus);
+    return fail(run, run.status, err, deps, bus);
   }
 }
 

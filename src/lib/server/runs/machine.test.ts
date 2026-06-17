@@ -74,4 +74,22 @@ describe('runPlan', () => {
     const run = await runPlan(run0.id, run0.plan, deps, bus);
     expect(run.status).toBe('awaiting_deposit');
   });
+
+  it('dedups the same URL across sources before extracting (no double extract/compress)', async () => {
+    const bus = makeEventBus();
+    const extract = vi.fn(async () => '# page');
+    const deps = fakeDeps({
+      extract,
+      web: {
+        dimension: 'web',
+        api: 'tavily',
+        run: vi.fn(async () => [{ url: 'https://dup.com', title: 'D', snippet: 's' }])
+      } as any
+    });
+    // startRun proposes 2 sources; both return the SAME url → only one should be extracted
+    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    expect(run.evidence).toHaveLength(1);
+    expect(extract).toHaveBeenCalledTimes(1);
+  });
 });
