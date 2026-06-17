@@ -96,10 +96,17 @@
 			const e = JSON.parse(m.data);
 			if (e.phase === 'heartbeat') return;
 			if (phase === 'done') return; // don't let a late event downgrade a finished run
+			if (e.phase === 'querying') {
+				// 'querying' is the search-in-progress signal (the main work). Keep the UI
+				// in the 'searching' phase so the timeline + per-source chips stay visible,
+				// and only update the per-source status — never flip phase to 'querying'
+				// (which would drop out of `working` and blank the screen).
+				phase = 'searching';
+				sourceStatus = { ...sourceStatus, [e.sourceId]: { title: e.title ?? e.sourceId, status: e.status } };
+				return;
+			}
 			phase = e.phase;
 			if (e.phase === 'awaiting_edit') plan = e.plan;
-			else if (e.phase === 'querying')
-				sourceStatus = { ...sourceStatus, [e.sourceId]: { title: e.title ?? e.sourceId, status: e.status } };
 			else if (e.phase === 'awaiting_deposit') {
 				markdown = e.markdown;
 				depositFiles = e.files ?? [];
@@ -151,11 +158,21 @@
 		markdown = '';
 		reportPath = '';
 		errorMsg = '';
-		await fetch(`/api/run/${runId}/plan`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ plan })
-		});
+		// Optimistically enter the search UI immediately: the backend sets status to
+		// 'searching' but emits no 'searching' event (the first event is 'querying'),
+		// so without this the editor would linger and the timeline would stay hidden
+		// until the first source returns — looking like nothing happened.
+		phase = 'searching';
+		try {
+			await fetch(`/api/run/${runId}/plan`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ plan })
+			});
+		} catch {
+			phase = 'error';
+			errorMsg = '无法连接本地服务';
+		}
 	}
 
 	async function deposit() {
@@ -233,7 +250,7 @@
 			<label class="fld" for="q">想了解点什么？</label>
 			<textarea id="q" rows="2" bind:value={question} placeholder="提出你的问题…"></textarea>
 			<div class="toolbar-between" style="margin-top:12px">
-				<span class="dim">便宜模型铺广度，强模型收口；维度可编辑</span>
+				<span class="dim">维度可编辑</span>
 				<button class="btn btn-primary" onclick={start} disabled={!question.trim() || phase === 'proposing'}>
 					{#if phase === 'proposing'}<span class="spin"></span> 生成中…{:else}生成搜索计划 <i class="ph ph-arrow-right"></i>{/if}
 				</button>

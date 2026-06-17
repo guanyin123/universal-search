@@ -85,7 +85,10 @@ body {
 	border: 1px solid var(--line);
 	border-radius: var(--radius-panel);
 	box-shadow: var(--shadow);
-	overflow: hidden;
+	/* visible (not hidden) so the settings popover — absolutely positioned and
+	   extending below the topbar — isn't clipped. The rounded-corner look is kept
+	   by the border + radius; inner blocks (.report) clip themselves. */
+	overflow: visible;
 }
 .topbar {
 	display: flex;
