@@ -13,6 +13,7 @@ export async function assertCleanVault(vaultRoot: string): Promise<void> {
 
 /** Stage the given vault-relative files and commit. Returns the short sha. */
 export async function autocommit(vaultRoot: string, files: string[], message: string): Promise<string> {
+  if (files.length === 0) throw new Error('autocommit: no files to commit');
   const git = simpleGit(vaultRoot);
   await git.add(files);
   await git.commit(message);

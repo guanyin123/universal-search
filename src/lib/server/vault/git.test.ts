@@ -22,9 +22,24 @@ describe('assertCleanVault', () => {
   it('passes when the tree is clean', async () => {
     await expect(assertCleanVault(dir)).resolves.toBeUndefined();
   });
-  it('throws when the tree is dirty', async () => {
+  it('throws when the tree is dirty (untracked file)', async () => {
     await writeFile(join(dir, 'dirty.md'), 'x');
     await expect(assertCleanVault(dir)).rejects.toThrow(/dirty/i);
+  });
+  it('throws when a tracked file is modified', async () => {
+    await writeFile(join(dir, 'seed.md'), 'modified');
+    await expect(assertCleanVault(dir)).rejects.toThrow(/dirty/i);
+  });
+  it('throws when a file is staged but not committed', async () => {
+    await writeFile(join(dir, 'staged.md'), 'x');
+    await simpleGit(dir).add('staged.md');
+    await expect(assertCleanVault(dir)).rejects.toThrow(/dirty/i);
+  });
+});
+
+describe('autocommit guard', () => {
+  it('throws on an empty files list (never makes an empty/over-broad commit)', async () => {
+    await expect(autocommit(dir, [], 'noop')).rejects.toThrow(/no files/i);
   });
 });
 

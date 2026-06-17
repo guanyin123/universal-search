@@ -29,3 +29,27 @@ describe('serializeFrontmatter', () => {
     expect(out.trim().endsWith('---')).toBe(true);
   });
 });
+
+describe('serializeFrontmatter — YAML safety', () => {
+  it('quotes a title containing a newline so the frontmatter block is not broken', () => {
+    const fm = buildFrontmatter({ title: 'line1\nline2', date: '2026-06-17', tags: [], sources: [], related: [] });
+    const out = serializeFrontmatter(fm);
+    expect(out).toContain('title: "line1\\nline2"');
+    // exactly two fences (open + close); the title's newline must not leak a stray line
+    expect(out.split('\n').filter((l) => l === '---')).toHaveLength(2);
+  });
+
+  it('quotes YAML-reserved and flow-special scalars inside arrays', () => {
+    const fm = buildFrontmatter({
+      title: 'T',
+      date: '2026-06-17',
+      tags: ['null', 'a,b', '|pipe'],
+      sources: [],
+      related: []
+    });
+    const out = serializeFrontmatter(fm);
+    expect(out).toContain('"null"');
+    expect(out).toContain('"a,b"');
+    expect(out).toContain('"|pipe"');
+  });
+});

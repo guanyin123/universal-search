@@ -30,7 +30,25 @@ export function buildFrontmatter(input: {
   };
 }
 
-const yamlString = (s: string) => (/[:#\-\[\]{}]/.test(s) ? JSON.stringify(s) : s);
+// Scalars YAML would misparse as a non-string (keyword) — must be quoted.
+const YAML_RESERVED = new Set(['null', 'true', 'false', 'yes', 'no', 'on', 'off', '~']);
+
+/**
+ * Emit a safe YAML scalar. When the value could break the frontmatter block
+ * (newline/tab), be misread as a YAML indicator/flow char, look like a reserved
+ * keyword, or have edge whitespace, JSON-stringify it (a valid YAML double-quoted
+ * scalar). Otherwise emit it bare to match the vault's plain style.
+ */
+function yamlString(s: string): string {
+  const risky =
+    s === '' ||
+    YAML_RESERVED.has(s.toLowerCase()) ||
+    /[\n\r\t]/.test(s) || // newlines/tabs would break the block
+    /[:#\[\]{}&*!|>%@`"',]/.test(s) || // YAML indicator / flow chars
+    /^[\s>|*&!#%@`"',?-]/.test(s) || // dangerous leading char
+    /\s$/.test(s); // trailing whitespace
+  return risky ? JSON.stringify(s) : s;
+}
 const yamlArray = (a: string[]) => `[${a.map(yamlString).join(', ')}]`;
 
 export function serializeFrontmatter(fm: Frontmatter): string {

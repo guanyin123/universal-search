@@ -1,5 +1,6 @@
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import type { Evidence, DepositFile } from '../runs/types';
 import type { Frontmatter } from './frontmatter';
 import { serializeFrontmatter } from './frontmatter';
@@ -51,10 +52,17 @@ export function buildDepositPlan(input: {
 /** Atomically write every file in the plan, asserting each path stays inside the vault. */
 export async function writeDepositPlan(vaultRoot: string, plan: DepositPlan): Promise<void> {
   for (const f of plan.files) {
-    const abs = resolveInsideVault(vaultRoot, f.path);
-    await mkdir(dirname(abs), { recursive: true });
-    const tmp = `${abs}.${Date.now()}.tmp`;
-    await writeFile(tmp, f.contents, 'utf8');
-    await rename(tmp, abs);
+    try {
+      const abs = resolveInsideVault(vaultRoot, f.path);
+      await mkdir(dirname(abs), { recursive: true });
+      const tmp = `${abs}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`;
+      await writeFile(tmp, f.contents, 'utf8');
+      await rename(tmp, abs);
+    } catch (err) {
+      throw new Error(
+        `Vault write failed at ${f.path}: ${err instanceof Error ? err.message : String(err)}. ` +
+          'The vault may be in a partial state — remove leftover .tmp files and any uncommitted .md files before retrying.'
+      );
+    }
   }
 }
