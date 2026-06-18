@@ -7,6 +7,7 @@ export async function GET() {
   const models = await listModels(cfg.llm);
   return json({
     models,
-    defaults: { fanout: cfg.llm.fanoutModel, synth: cfg.llm.synthModel }
+    defaults: { fanout: cfg.llm.fanoutModel, synth: cfg.llm.synthModel },
+    baseURL: cfg.llm.baseURL
   });
 }
