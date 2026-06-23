@@ -7,6 +7,12 @@ describe('buildProposePrompt', () => {
     expect(p).toContain('How does RAG work?');
     expect(p.toLowerCase()).toContain('json');
   });
+
+  it('peoples_writing variant targets personal long-form writing', () => {
+    const p = buildProposePrompt('How does RAG work?', 'peoples_writing');
+    expect(p).toContain('How does RAG work?');
+    expect(p.toLowerCase()).toMatch(/blog|essay|personal|long-form|newsletter/);
+  });
 });
 
 describe('parseProposedQueries', () => {

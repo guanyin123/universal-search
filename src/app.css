@@ -333,6 +333,22 @@ input::placeholder {
 	flex: none;
 }
 
+/* dimension grouping in the plan editor */
+.dim-group {
+	margin-bottom: 16px;
+}
+.dim-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 16px 0 8px;
+}
+.dim-name {
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
 /* progress timeline */
 .tl {
 	list-style: none;

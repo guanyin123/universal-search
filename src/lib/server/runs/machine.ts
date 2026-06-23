@@ -1,6 +1,6 @@
 import type { MachineDeps } from './deps';
 import type { EventBus } from '../events';
-import type { Run, RunPlan, Evidence, PlanSource } from './types';
+import type { Run, RunPlan, Evidence, PlanSource, PlanDimension, DimensionKey } from './types';
 import { newRunId, slugify } from '../ids';
 import { buildProposePrompt, parseProposedQueries } from '../pipeline/propose';
 import { buildCompressPrompt } from '../pipeline/compress';
@@ -10,6 +10,13 @@ import { buildDepositPlan } from '../vault/writer';
 import { buildFrontmatter } from '../vault/frontmatter';
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+const DIMENSION_LABELS: Record<DimensionKey, string> = {
+  web: 'Web',
+  peoples_writing: '他人写作'
+};
+// Proposal order; only dimensions with a configured runner are actually used.
+const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing'];
 
 export async function startRun(
   input: { question: string; models: { fanout: string; synth: string } },
@@ -30,19 +37,35 @@ export async function startRun(
   bus.emit(id, { phase: 'proposing' });
 
   try {
-    const raw = await deps.llm.complete({
-      role: 'fanout',
-      model: input.models.fanout,
-      prompt: buildProposePrompt(input.question)
-    });
-    const queries = parseProposedQueries(raw);
-    const sources: PlanSource[] = queries.map((q, i) => ({
-      id: `web-${i + 1}`,
-      api: 'tavily',
-      query: q,
-      enabled: true
-    }));
-    run.plan = { dimensions: [{ key: 'web', label: 'Web', enabled: true, sources }] };
+    // Propose queries for every configured dimension. A single dimension's
+    // failure is skipped (not fatal) so e.g. an Exa hiccup never drops Web;
+    // only if NO dimension yields queries do we abort.
+    const available = DIMENSION_ORDER.filter((k) => deps.runners[k]);
+    const dimensions: PlanDimension[] = [];
+    for (const key of available) {
+      const runner = deps.runners[key]!;
+      try {
+        const raw = await deps.llm.complete({
+          role: 'fanout',
+          model: input.models.fanout,
+          prompt: buildProposePrompt(input.question, key)
+        });
+        const queries = parseProposedQueries(raw);
+        const sources: PlanSource[] = queries.map((q, i) => ({
+          id: `${key}-${i + 1}`,
+          api: runner.api,
+          query: q,
+          enabled: true
+        }));
+        dimensions.push({ key, label: DIMENSION_LABELS[key], enabled: true, sources });
+      } catch (err) {
+        console.warn(`[propose] dimension ${key} failed; skipping:`, err instanceof Error ? err.message : err);
+      }
+    }
+    if (dimensions.length === 0) {
+      throw new Error('未能为任何维度生成搜索查询。');
+    }
+    run.plan = { dimensions };
     run.status = 'awaiting_edit';
     await deps.store.save(run);
     bus.emit(id, { phase: 'awaiting_edit', plan: run.plan });
@@ -67,38 +90,52 @@ export async function runPlan(
   try {
     const evidence: Evidence[] = [];
     const seenUrls = new Set<string>();
-    const sources = editedPlan.dimensions
-      .filter((d) => d.enabled)
-      .flatMap((d) => d.sources)
-      .filter((s) => s.enabled);
 
-    for (const src of sources) {
-      bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'start' });
-      try {
-        const results = await deps.web.run(src.query);
-        for (const r of results) {
-          // Dedup by URL BEFORE the expensive extract+compress — multiple queries
-          // may surface the same page; never pay Jina/LLM for it twice.
-          if (seenUrls.has(r.url)) continue;
-          seenUrls.add(r.url);
-          const md = await deps.extract(r.url);
-          const compressed = await deps.llm.complete({
-            role: 'fanout',
-            model: run.models.fanout,
-            prompt: buildCompressPrompt(run.question, r.title, md || r.snippet)
-          });
-          if (compressed.trim() === 'IRRELEVANT') continue;
-          evidence.push({
-            sourceId: src.id,
-            url: r.url,
-            title: r.title,
-            compressed,
-            retrievedAt: isoDate(deps.now())
-          });
+    // Iterate dimensions (not a flat source list) so each source keeps its
+    // dimension context and dispatches to the right runner.
+    for (const dim of editedPlan.dimensions) {
+      if (!dim.enabled) continue;
+      const runner = deps.runners[dim.key];
+      for (const src of dim.sources) {
+        if (!src.enabled) continue;
+        bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'start' });
+        if (!runner) {
+          // Dimension has no configured runner (e.g. missing key) — fail this
+          // source gracefully instead of crashing the whole run.
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'fail', title: src.query });
+          continue;
         }
-        bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'ok', title: src.query });
-      } catch {
-        bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'fail', title: src.query });
+        try {
+          const results = await runner.run(src.query);
+          for (const r of results) {
+            // Dedup by URL BEFORE the expensive extract+compress — multiple queries
+            // may surface the same page; never pay Jina/LLM for it twice.
+            // seenUrls is intentionally global across dimensions (declared above the
+            // dimension loop), so a URL shared by Web + 他人写作 is fetched once and
+            // tagged with the FIRST dimension to surface it (web, per DIMENSION_ORDER);
+            // the later dimension's instance is dropped. Acceptable for v2.
+            if (seenUrls.has(r.url)) continue;
+            seenUrls.add(r.url);
+            const md = await deps.extract(r.url);
+            const compressed = await deps.llm.complete({
+              role: 'fanout',
+              model: run.models.fanout,
+              prompt: buildCompressPrompt(run.question, r.title, md || r.snippet)
+            });
+            if (compressed.trim() === 'IRRELEVANT') continue;
+            evidence.push({
+              sourceId: src.id,
+              dimension: dim.key,
+              url: r.url,
+              title: r.title,
+              compressed,
+              retrievedAt: isoDate(deps.now())
+            });
+          }
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'ok', title: src.query });
+        } catch {
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'fail', title: src.query });
+        }
       }
     }
 

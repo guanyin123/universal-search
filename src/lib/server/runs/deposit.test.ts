@@ -41,7 +41,7 @@ function depositableRun(): Run {
 
 function deps(): MachineDeps {
   return {
-    vaultRoot: vault, llm: {} as any, web: {} as any, extract: vi.fn(),
+    vaultRoot: vault, llm: {} as any, runners: {} as any, extract: vi.fn(),
     store: makeRunStore(runsDir), now: () => new Date('2026-06-17T00:00:00Z')
   };
 }

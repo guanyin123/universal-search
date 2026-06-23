@@ -1,4 +1,9 @@
-import type { Evidence } from '../runs/types';
+import type { Evidence, DimensionKey } from '../runs/types';
+
+const DIM_LABEL: Record<DimensionKey, string> = {
+  web: 'Web',
+  peoples_writing: '他人写作'
+};
 
 export const SMART_DEFAULT_SECTIONS = [
   '## 问题界定',
@@ -12,7 +17,7 @@ export const SMART_DEFAULT_SECTIONS = [
 
 export function buildSynthesisPrompt(question: string, evidence: Evidence[]): string {
   const sources = evidence
-    .map((e, i) => `[${i + 1}] ${e.title} — ${e.url}\n${e.compressed}`)
+    .map((e, i) => `[${i + 1}] (${DIM_LABEL[e.dimension] ?? e.dimension}) ${e.title} — ${e.url}\n${e.compressed}`)
     .join('\n\n');
 
   return [
@@ -23,7 +28,7 @@ export function buildSynthesisPrompt(question: string, evidence: Evidence[]): st
     'Rules:',
     '- Start with a 1-2 sentence executive answer as a blockquote (>) under the H1 title.',
     '- In 核心发现, every claim ends with an inline citation like [1] and a confidence tag (置信度: 高/中/低).',
-    '- In 来源, list each numbered source with its URL.',
+    '- In 来源, group sources by their dimension label (e.g. Web / 他人写作), listing each numbered source with its URL under its dimension.',
     '- Only use the evidence provided. If evidence is thin, say so in 分歧与警示 / 开放问题.',
     '- Begin the document with an H1 line: "# " followed by a faithful restatement of the question.',
     '',

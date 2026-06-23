@@ -181,16 +181,17 @@
 		await fetch(`/api/run/${runId}/deposit`, { method: 'POST' });
 	}
 
-	function addSource() {
-		plan!.dimensions[0].sources.push({
-			id: `web-${plan!.dimensions[0].sources.length + 1}`,
-			api: 'tavily',
+	function addSource(di: number) {
+		const dim = plan!.dimensions[di];
+		dim.sources.push({
+			id: `${dim.key}-${dim.sources.length + 1}`,
+			api: dim.key === 'web' ? 'tavily' : 'exa',
 			query: '',
 			enabled: true
 		});
 	}
-	function removeSource(i: number) {
-		plan!.dimensions[0].sources.splice(i, 1);
+	function removeSource(di: number, i: number) {
+		plan!.dimensions[di].sources.splice(i, 1);
 	}
 </script>
 
@@ -259,20 +260,30 @@
 			<!-- 搜索计划（可编辑） -->
 			{#if plan && phase === 'awaiting_edit'}
 				<div class="plan-head">
-					<h2>搜索计划 · Web 维度</h2>
+					<h2>搜索计划</h2>
 					<span class="dim">勾选启用 · 直接改写查询 · 可增删</span>
 				</div>
-				{#each plan.dimensions[0].sources as s, i (s.id)}
-					<div class="src">
-						<i class="ph ph-dots-six-vertical grip"></i>
-						<button class="tgl" class:off={!s.enabled} onclick={() => (s.enabled = !s.enabled)} aria-label="启用或停用此源"></button>
-						<input type="text" bind:value={s.query} style={s.enabled ? '' : 'color:var(--ink-3)'} />
-						<span class="badge-api">{s.api}</span>
-						<button class="del" onclick={() => removeSource(i)} aria-label="删除"><i class="ph ph-x"></i></button>
+				{#each plan.dimensions as dim, di (dim.key)}
+					<div class="dim-group" style={dim.enabled ? '' : 'opacity:.55'}>
+						<div class="dim-head">
+							<button class="tgl" class:off={!dim.enabled} onclick={() => (dim.enabled = !dim.enabled)} aria-label="启用或停用此维度"></button>
+							<span class="dim-name">{dim.label}</span>
+							<span class="dim">{dim.sources.length} 个源</span>
+						</div>
+						{#each dim.sources as s, i (s.id)}
+							<div class="src">
+								<i class="ph ph-dots-six-vertical grip"></i>
+								<button class="tgl" class:off={!s.enabled} onclick={() => (s.enabled = !s.enabled)} aria-label="启用或停用此源"></button>
+								<input type="text" bind:value={s.query} style={s.enabled ? '' : 'color:var(--ink-3)'} />
+								<span class="badge-api">{s.api}</span>
+								<button class="del" onclick={() => removeSource(di, i)} aria-label="删除"><i class="ph ph-x"></i></button>
+							</div>
+						{/each}
+						<button class="btn btn-ghost" onclick={() => addSource(di)}><i class="ph ph-plus"></i> 添加搜索源</button>
 					</div>
 				{/each}
 				<div class="toolbar-between">
-					<button class="btn btn-ghost" onclick={addSource}><i class="ph ph-plus"></i> 添加搜索源</button>
+					<span class="dim"></span>
 					<button class="btn btn-primary" onclick={runIt}>开始搜索 <i class="ph ph-arrow-right"></i></button>
 				</div>
 			{/if}

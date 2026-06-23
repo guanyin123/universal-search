@@ -4,8 +4,8 @@ import type { Evidence } from '../runs/types';
 import { buildFrontmatter } from './frontmatter';
 
 const evidence: Evidence[] = [
-  { sourceId: 's1', url: 'https://a.com', title: 'Alpha', compressed: '- a', retrievedAt: '2026-06-17' },
-  { sourceId: 's2', url: 'https://b.com', title: 'Beta', compressed: '- b', retrievedAt: '2026-06-17' }
+  { sourceId: 's1', dimension: 'web', url: 'https://a.com', title: 'Alpha', compressed: '- a', retrievedAt: '2026-06-17' },
+  { sourceId: 's2', dimension: 'web', url: 'https://b.com', title: 'Beta', compressed: '- b', retrievedAt: '2026-06-17' }
 ];
 
 describe('buildDepositPlan', () => {

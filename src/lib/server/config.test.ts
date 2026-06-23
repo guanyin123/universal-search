@@ -25,6 +25,11 @@ describe('loadConfig', () => {
     expect(cfg.jina.apiKey).toBeUndefined();
   });
 
+  it('parses EXA_API_KEY when present and is undefined when absent', () => {
+    expect(loadConfig({ ...base, EXA_API_KEY: 'exa-x' }).exa.apiKey).toBe('exa-x');
+    expect(loadConfig(base).exa.apiKey).toBeUndefined();
+  });
+
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);

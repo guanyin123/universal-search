@@ -1,4 +1,18 @@
-export function buildProposePrompt(question: string): string {
+import type { DimensionKey } from '../runs/types';
+
+export function buildProposePrompt(question: string, dimension: DimensionKey = 'web'): string {
+  if (dimension === 'peoples_writing') {
+    return [
+      'You plan a search for INDIVIDUAL, opinionated long-form writing —',
+      'personal blog posts, essays, newsletters, first-person deep dives —',
+      'on a research question, NOT official docs or news articles.',
+      'Output ONLY a JSON array of 2-3 concise search query strings that surface',
+      'thoughtful personal perspectives from complementary angles.',
+      'No prose, no keys — just the array.',
+      '',
+      `Question: ${question}`
+    ].join('\n');
+  }
   return [
     'You plan web searches for a research question.',
     'Output ONLY a JSON array of 2-3 concise, high-signal web search query strings',

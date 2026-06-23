@@ -8,6 +8,7 @@ export interface AppConfig {
     models: string[]; // fallback allowlist when provider /models is unavailable
   };
   tavily: { apiKey: string };
+  exa: { apiKey?: string };
   jina: { apiKey?: string };
 }
 
@@ -33,6 +34,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
         .filter(Boolean)
     },
     tavily: { apiKey: required(env, 'TAVILY_API_KEY') },
+    exa: { apiKey: env.EXA_API_KEY?.trim() || undefined },
     jina: { apiKey: env.JINA_API_KEY?.trim() || undefined }
   };
 }

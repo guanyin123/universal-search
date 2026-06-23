@@ -10,15 +10,20 @@ export type RunStatus =
   | 'done'
   | 'error';
 
+/** Dimensions the planner can model. v2 adds peoples_writing (Exa); web is v1. */
+export type DimensionKey = 'web' | 'peoples_writing';
+/** Search APIs backing a source. */
+export type SourceApi = 'tavily' | 'exa';
+
 export interface PlanSource {
   id: string;
-  api: 'tavily';
+  api: SourceApi;
   query: string;
   enabled: boolean;
 }
 
 export interface PlanDimension {
-  key: 'web';
+  key: DimensionKey;
   label: string;
   enabled: boolean;
   sources: PlanSource[];
@@ -30,6 +35,7 @@ export interface RunPlan {
 
 export interface Evidence {
   sourceId: string;
+  dimension: DimensionKey;
   url: string;
   title: string;
   compressed: string;
