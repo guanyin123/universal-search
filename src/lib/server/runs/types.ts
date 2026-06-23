@@ -45,7 +45,7 @@ export interface Evidence {
 
 export interface DepositFile {
   path: string; // vault-relative
-  kind: 'synthesis' | 'raw';
+  kind: 'synthesis' | 'raw' | 'workflow';
   contents: string;
 }
 
