@@ -28,6 +28,7 @@ function fakeDeps(over: Partial<MachineDeps> = {}): MachineDeps {
       }
     },
     extract: vi.fn(async () => '# page\nbody'),
+    readLibrary: vi.fn(async () => ({ vocab: [], notes: [] })),
     store: makeRunStore(dir),
     now: () => new Date('2026-06-17T00:00:00Z'),
     ...over
@@ -211,6 +212,36 @@ describe('runPlan', () => {
     const run = await runPlan(run0.id, run0.plan, deps, bus);
     expect(run.evidence).toHaveLength(1);
     expect(extract).toHaveBeenCalledTimes(1);
+  });
+
+  it('biases tags toward the vault vocabulary and auto-links related notes by tag overlap', async () => {
+    const bus = makeEventBus();
+    const library = {
+      vocab: ['RAG', 'AI', '检索'],
+      notes: [
+        { path: 'wiki/synthesis/rag-basics.md', title: 'RAG Basics', tags: ['RAG', 'AI'] },
+        { path: 'wiki/synthesis/cooking.md', title: 'Cooking', tags: ['food'] }
+      ]
+    };
+    const deps = fakeDeps({ readLibrary: vi.fn(async () => library) });
+    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+
+    let tagsPrompt = '';
+    (deps.llm.complete as any).mockImplementation(async ({ role, prompt }: any) => {
+      if (/topical tags/i.test(prompt)) {
+        tagsPrompt = prompt;
+        return '["RAG","AI"]';
+      }
+      if (role === 'synth') return '# Q\n> a\n## 来源\n[1]';
+      return '- compressed';
+    });
+
+    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    expect(deps.readLibrary).toHaveBeenCalled();
+    // the existing vocabulary was offered to the tag generator
+    expect(tagsPrompt).toContain('RAG');
+    // related auto-linked to the tag-overlapping note only (not the unrelated one, not self)
+    expect(run.report?.frontmatter.related).toEqual(['wiki/synthesis/rag-basics.md']);
   });
 
   it('gracefully degrades an enabled dimension whose runner is missing (no crash)', async () => {

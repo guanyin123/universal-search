@@ -4,6 +4,7 @@ import { makeTavilyRunner } from '../search/tavily';
 import { makeExaRunner } from '../search/exa';
 import { makeCommunityRunner } from '../search/community';
 import { makeJinaExtractor } from '../search/jina';
+import { readVaultLibrary, type VaultLibrary } from '../vault/library';
 import { makeRunStore, type RunStore } from './store';
 import type { SourceRunner } from '../search/types';
 import type { DimensionKey } from './types';
@@ -18,6 +19,9 @@ export interface MachineDeps {
    *  proposed or rendered (graceful degrade). */
   runners: Partial<Record<DimensionKey, SourceRunner>>;
   extract: (url: string) => Promise<string>;
+  /** Reads the vault's existing notes → tag vocabulary + related-link candidates.
+   *  Graceful: a fresh/unreadable vault returns an empty library. */
+  readLibrary: () => Promise<VaultLibrary>;
   store: RunStore;
   now: () => Date;
 }
@@ -34,6 +38,7 @@ export function realDeps(): MachineDeps {
     llm: makeLlm(cfg.llm),
     runners,
     extract: makeJinaExtractor(cfg.jina.apiKey),
+    readLibrary: () => readVaultLibrary(cfg.vaultRoot),
     store: makeRunStore(join(process.cwd(), '.runs')),
     now: () => new Date()
   };

@@ -8,6 +8,7 @@ import { buildSynthesisPrompt } from '../pipeline/template';
 import { buildTagsPrompt, parseTags } from '../pipeline/tags';
 import { buildDepositPlan } from '../vault/writer';
 import { buildFrontmatter } from '../vault/frontmatter';
+import { rankRelated, type VaultLibrary } from '../vault/library';
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -159,6 +160,17 @@ export async function runPlan(
 
     const date = isoDate(deps.now());
     const slug = slugify(run.question);
+    const reportPath = `wiki/synthesis/${slug}.md`;
+
+    // Read the existing vault once: its tags bias new-tag generation toward the
+    // user's vocabulary, and its tag overlap auto-links related[]. Graceful — a
+    // fresh/unreadable vault yields an empty library (no vocab, no related).
+    let library: VaultLibrary = { vocab: [], notes: [] };
+    try {
+      library = await deps.readLibrary();
+    } catch {
+      library = { vocab: [], notes: [] };
+    }
 
     let tags: string[] = [];
     try {
@@ -166,9 +178,7 @@ export async function runPlan(
         // tags is a cheap extraction task → fanout (cheap) model, not synth.
         role: 'fanout',
         model: run.models.fanout,
-        // vocab is empty in v1; biasing tag reuse from existing vault tags is a v2 item
-        // (same deferral as related[] auto-linking, per the spec §15 decisions).
-        prompt: buildTagsPrompt(run.question, [])
+        prompt: buildTagsPrompt(run.question, library.vocab)
       });
       tags = parseTags(tagRaw);
     } catch {
@@ -180,7 +190,7 @@ export async function runPlan(
       date,
       tags,
       sources: evidence.map((e) => e.url),
-      related: []
+      related: rankRelated(library.notes, tags, reportPath)
     });
     const depositPlan = buildDepositPlan({ slug, date, frontmatter, reportBody: markdown, evidence });
 
