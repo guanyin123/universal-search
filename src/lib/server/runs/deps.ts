@@ -2,6 +2,7 @@ import { getConfig } from '../runtime-config';
 import { makeLlm, type Llm } from '../llm/client';
 import { makeTavilyRunner } from '../search/tavily';
 import { makeExaRunner } from '../search/exa';
+import { makeCommunityRunner } from '../search/community';
 import { makeJinaExtractor } from '../search/jina';
 import { makeRunStore, type RunStore } from './store';
 import type { SourceRunner } from '../search/types';
@@ -12,8 +13,9 @@ export interface MachineDeps {
   vaultRoot: string;
   llm: Llm;
   /** Source runners keyed by dimension. web is always present; peoples_writing
-   *  (Exa) only when EXA_API_KEY is configured — absent dimensions are simply
-   *  never proposed or rendered (graceful degrade). */
+   *  (Exa) only when EXA_API_KEY is configured; community (Reddit+HN, keyless)
+   *  only when COMMUNITY_ENABLED=true — absent dimensions are simply never
+   *  proposed or rendered (graceful degrade). */
   runners: Partial<Record<DimensionKey, SourceRunner>>;
   extract: (url: string) => Promise<string>;
   store: RunStore;
@@ -26,6 +28,7 @@ export function realDeps(): MachineDeps {
     web: makeTavilyRunner(cfg.tavily.apiKey)
   };
   if (cfg.exa.apiKey) runners.peoples_writing = makeExaRunner(cfg.exa.apiKey);
+  if (cfg.community.enabled) runners.community = makeCommunityRunner();
   return {
     vaultRoot: cfg.vaultRoot,
     llm: makeLlm(cfg.llm),

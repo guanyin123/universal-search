@@ -9,6 +9,7 @@ export interface AppConfig {
   };
   tavily: { apiKey: string };
   exa: { apiKey?: string };
+  community: { enabled: boolean };
   jina: { apiKey?: string };
 }
 
@@ -35,6 +36,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     },
     tavily: { apiKey: required(env, 'TAVILY_API_KEY') },
     exa: { apiKey: env.EXA_API_KEY?.trim() || undefined },
+    community: { enabled: env.COMMUNITY_ENABLED?.trim() === 'true' },
     jina: { apiKey: env.JINA_API_KEY?.trim() || undefined }
   };
 }

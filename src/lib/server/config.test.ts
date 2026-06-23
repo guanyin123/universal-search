@@ -30,6 +30,12 @@ describe('loadConfig', () => {
     expect(loadConfig(base).exa.apiKey).toBeUndefined();
   });
 
+  it('enables the community dimension only when COMMUNITY_ENABLED is exactly "true"', () => {
+    expect(loadConfig({ ...base, COMMUNITY_ENABLED: 'true' }).community.enabled).toBe(true);
+    expect(loadConfig({ ...base, COMMUNITY_ENABLED: '1' }).community.enabled).toBe(false);
+    expect(loadConfig(base).community.enabled).toBe(false);
+  });
+
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);

@@ -13,6 +13,12 @@ describe('buildProposePrompt', () => {
     expect(p).toContain('How does RAG work?');
     expect(p.toLowerCase()).toMatch(/blog|essay|personal|long-form|newsletter/);
   });
+
+  it('community variant targets discussion forums (Reddit / HN)', () => {
+    const p = buildProposePrompt('How does RAG work?', 'community');
+    expect(p).toContain('How does RAG work?');
+    expect(p.toLowerCase()).toMatch(/reddit|hacker news|forum|discussion/);
+  });
 });
 
 describe('parseProposedQueries', () => {

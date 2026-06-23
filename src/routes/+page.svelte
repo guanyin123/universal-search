@@ -181,11 +181,12 @@
 		await fetch(`/api/run/${runId}/deposit`, { method: 'POST' });
 	}
 
+	const DIM_API = { web: 'tavily', peoples_writing: 'exa', community: 'community' } as const;
 	function addSource(di: number) {
 		const dim = plan!.dimensions[di];
 		dim.sources.push({
 			id: `${dim.key}-${dim.sources.length + 1}`,
-			api: dim.key === 'web' ? 'tavily' : 'exa',
+			api: DIM_API[dim.key as keyof typeof DIM_API] ?? 'tavily',
 			query: '',
 			enabled: true
 		});

@@ -13,10 +13,11 @@ const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
 const DIMENSION_LABELS: Record<DimensionKey, string> = {
   web: 'Web',
-  peoples_writing: '他人写作'
+  peoples_writing: '他人写作',
+  community: '社区'
 };
 // Proposal order; only dimensions with a configured runner are actually used.
-const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing'];
+const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing', 'community'];
 
 export async function startRun(
   input: { question: string; models: { fanout: string; synth: string } },

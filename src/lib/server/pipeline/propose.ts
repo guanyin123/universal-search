@@ -13,6 +13,18 @@ export function buildProposePrompt(question: string, dimension: DimensionKey = '
       `Question: ${question}`
     ].join('\n');
   }
+  if (dimension === 'community') {
+    return [
+      'You plan a search across community discussion forums (Reddit, Hacker News)',
+      'for first-hand experiences, debates, and practitioner opinions on a research',
+      'question — what real people report, recommend, or warn against.',
+      'Output ONLY a JSON array of 2-3 concise search query strings (keywords, not',
+      'questions) likely to match relevant threads from complementary angles.',
+      'No prose, no keys — just the array.',
+      '',
+      `Question: ${question}`
+    ].join('\n');
+  }
   return [
     'You plan web searches for a research question.',
     'Output ONLY a JSON array of 2-3 concise, high-signal web search query strings',
