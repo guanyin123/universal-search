@@ -9,6 +9,13 @@ import { buildTagsPrompt, parseTags } from '../pipeline/tags';
 import { buildDepositPlan } from '../vault/writer';
 import { buildFrontmatter } from '../vault/frontmatter';
 import { rankRelated, type VaultLibrary } from '../vault/library';
+import { planFromWorkflow, makeWorkflowSynthPrompt } from '../workflows/build';
+import type { WorkflowDoc } from '../workflows/types';
+
+/** Optional overrides for runPlan — lets v3 replay inject a workflow's own synthesis prompt. */
+export interface RunPlanOptions {
+  buildSynthPrompt?: (question: string, evidence: Evidence[]) => string;
+}
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -82,7 +89,8 @@ export async function runPlan(
   runId: string,
   editedPlan: RunPlan,
   deps: MachineDeps,
-  bus: EventBus
+  bus: EventBus,
+  opts: RunPlanOptions = {}
 ): Promise<Run> {
   const run = await deps.store.get(runId);
   if (!run) throw new Error(`run not found: ${runId}`);
@@ -167,7 +175,8 @@ export async function runPlan(
     const markdown = await deps.llm.complete({
       role: 'synth',
       model: run.models.synth,
-      prompt: buildSynthesisPrompt(run.question, evidence)
+      // Replay injects the workflow's own synthesis prompt; otherwise the default template.
+      prompt: (opts.buildSynthPrompt ?? buildSynthesisPrompt)(run.question, evidence)
     });
 
     const date = isoDate(deps.now());
@@ -215,6 +224,44 @@ export async function runPlan(
   } catch (err: any) {
     return fail(run, run.status, err, deps, bus);
   }
+}
+
+/**
+ * Replay step 1 — hydrate a stored workflow + a new question straight into a Run that
+ * already sits at `searching`, SKIPPING propose + awaiting_edit. Saved so runPlan can
+ * pick it up. Returns the created run (with its hydrated plan) so callers get the id for SSE.
+ */
+export async function hydrateReplay(
+  workflow: WorkflowDoc,
+  input: { question: string; models?: { fanout: string; synth: string } },
+  deps: MachineDeps
+): Promise<Run> {
+  const id = newRunId();
+  const run: Run = {
+    id,
+    createdAt: deps.now().toISOString(),
+    status: 'searching',
+    question: input.question,
+    models: input.models ?? workflow.modelConfig,
+    plan: planFromWorkflow(workflow, input.question),
+    evidence: []
+  };
+  await deps.store.save(run);
+  return run;
+}
+
+/**
+ * Replay a workflow end-to-end: hydrate (skip propose/edit) → reuse runPlan's
+ * search→compress→synth→tags→deposit chain, but with the workflow's own synthesis prompt.
+ */
+export async function replayWorkflow(
+  workflow: WorkflowDoc,
+  input: { question: string; models?: { fanout: string; synth: string } },
+  deps: MachineDeps,
+  bus: EventBus
+): Promise<Run> {
+  const run = await hydrateReplay(workflow, input, deps);
+  return runPlan(run.id, run.plan, deps, bus, { buildSynthPrompt: makeWorkflowSynthPrompt(workflow) });
 }
 
 async function fail(
