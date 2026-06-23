@@ -39,8 +39,8 @@ npx svelte-check  # 类型检查
 
 ## 路线图
 
-- **v1（当前）**：单 web 维度跑通整条脚骨。
-- **v2**：追加社区(Reddit/HN) / 人物写作(Exa) / 图片(Unsplash) 维度（实现 `SourceRunner` 适配器即可）；tags 复用 vault 既有词汇、`related[]` 自动关联。
-- **v3**：把一次成功的流程「另存为可复用工作流」（`.research-workflows/`），下次同类问题跳过编辑步骤；每工作流自带报告模板。
+- **v1**：单 web 维度跑通整条脚骨。✅
+- **v2**：追加社区(Reddit/HN) / 人物写作(Exa) / 图片(Unsplash) 维度（实现 `SourceRunner` 适配器即可）；tags 复用 vault 既有词汇、`related[]` 自动关联。✅
+- **v3（当前）**：把一次成功的流程「另存为可复用工作流」（`.research-workflows/<slug>.md`，复用 vault 写盘安全闸），下次同类问题加载工作流即跳过「提问→编辑计划」直接并行搜索，并复用该工作流自带的报告模板与综合 prompt。✅
 
 设计与计划文档见 `docs/superpowers/`。

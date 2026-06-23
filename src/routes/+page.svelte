@@ -32,10 +32,28 @@
 	let fanoutModel = $state('');
 	let synthModel = $state('');
 
+	// workflows (v3)
+	type WorkflowItem = { slug: string; name: string; questionPattern: string };
+	let workflows = $state<WorkflowItem[]>([]);
+	let savingWorkflow = $state(false);
+	let savedMsg = $state('');
+
 	onMount(() => {
 		mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
 		loadModels();
+		loadWorkflows();
 	});
+
+	async function loadWorkflows() {
+		try {
+			const r = await fetch('/api/workflows');
+			if (!r.ok) return;
+			const data = await r.json();
+			workflows = data.workflows ?? [];
+		} catch {
+			/* not fatal */
+		}
+	}
 
 	async function loadModels() {
 		try {
@@ -87,6 +105,61 @@
 		reportPath = '';
 		errorMsg = '';
 		depositing = false;
+		savingWorkflow = false;
+		savedMsg = '';
+	}
+
+	async function saveAsWorkflow() {
+		if (!runId || savingWorkflow) return;
+		savingWorkflow = true;
+		savedMsg = '';
+		try {
+			const r = await fetch('/api/workflows', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ runId })
+			});
+			const data = await r.json().catch(() => ({}));
+			if (r.ok && !data.error) {
+				savedMsg = `已另存为工作流：${data.name}`;
+				loadWorkflows();
+			} else {
+				savedMsg = data.error ? `保存失败：${data.error}` : `保存失败：HTTP ${r.status}`;
+			}
+		} catch {
+			savedMsg = '保存失败：无法连接本地服务';
+		} finally {
+			savingWorkflow = false;
+		}
+	}
+
+	async function replayWorkflow(slug: string) {
+		if (!question.trim()) return;
+		resetRun();
+		phase = 'searching';
+		settingsOpen = false;
+		let r: Response;
+		try {
+			r = await fetch('/api/workflows/replay', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ workflow: slug, question, fanoutModel, synthModel })
+			});
+		} catch {
+			phase = 'error';
+			errorMsg = '无法连接本地服务';
+			return;
+		}
+		if (!r.ok) {
+			phase = 'error';
+			errorMsg = `回放失败：HTTP ${r.status}`;
+			return;
+		}
+		const data = await r.json();
+		runId = data.id;
+		plan = data.plan;
+		phase = 'searching';
+		listen(data.id);
 	}
 
 	function listen(id: string) {
@@ -258,6 +331,29 @@
 				</button>
 			</div>
 
+			<!-- 已存工作流：输入问题后可直接回放（跳过提问/编辑计划） -->
+			{#if phase === 'idle' && workflows.length}
+				<div class="plan-head">
+					<h2>已存工作流</h2>
+					<span class="dim">回放跳过「提问→编辑计划」，直接并行搜索</span>
+				</div>
+				<div style="display:flex;flex-direction:column;gap:8px">
+					{#each workflows as wf (wf.slug)}
+						<button
+							class="btn btn-ghost"
+							style="justify-content:flex-start;gap:10px;text-align:left"
+							onclick={() => replayWorkflow(wf.slug)}
+							disabled={!question.trim()}
+							title={question.trim() ? '用上面的问题回放此工作流' : '先输入问题再回放'}
+						>
+							<i class="ph ph-lightning"></i>
+							<span style="font-weight:600">{wf.name}</span>
+							<span class="dim" style="margin-left:auto;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{wf.questionPattern}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+
 			<!-- 搜索计划（可编辑） -->
 			{#if plan && phase === 'awaiting_edit'}
 				<div class="plan-head">
@@ -359,6 +455,16 @@
 						</button>
 					</div>
 				{/if}
+			{/if}
+
+			<!-- 另存为工作流：成功 run 后可凝固成可复用工作流 -->
+			{#if (phase === 'awaiting_deposit' || phase === 'done') && markdown}
+				<div class="row" style="justify-content:space-between;margin-top:12px">
+					<span class="dim">{savedMsg}</span>
+					<button class="btn btn-ghost" onclick={saveAsWorkflow} disabled={savingWorkflow}>
+						{#if savingWorkflow}<span class="spin"></span> 保存中…{:else}<i class="ph ph-floppy-disk"></i> 另存为工作流{/if}
+					</button>
+				</div>
 			{/if}
 
 			<!-- 完成 -->
