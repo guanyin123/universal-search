@@ -244,6 +244,35 @@ describe('runPlan', () => {
     expect(run.report?.frontmatter.related).toEqual(['wiki/synthesis/rag-basics.md']);
   });
 
+  it('embeds image-dimension results as Markdown figures, skipping extract + compress', async () => {
+    const bus = makeEventBus();
+    const extract = vi.fn(async () => '# page');
+    const imgRun = vi.fn(async () => [
+      {
+        url: 'https://unsplash.com/photos/abc',
+        title: 'A calico cat',
+        snippet: '— 摄影 [Jane](https://unsplash.com/@jane) · [Unsplash](https://unsplash.com/photos/abc)',
+        imageUrl: 'https://images.unsplash.com/abc?w=1080'
+      }
+    ]);
+    const deps = fakeDeps({
+      extract,
+      runners: { images: { dimension: 'images', api: 'unsplash', run: imgRun } } as any
+    });
+    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    expect(run0.plan.dimensions.map((d) => d.key)).toEqual(['images']);
+
+    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    expect(imgRun).toHaveBeenCalled();
+    // images bypass the text pipeline entirely
+    expect(extract).not.toHaveBeenCalled();
+    expect(run.status).toBe('awaiting_deposit');
+    expect(run.evidence).toHaveLength(1);
+    expect(run.evidence[0].dimension).toBe('images');
+    expect(run.evidence[0].compressed).toContain('![A calico cat](https://images.unsplash.com/abc?w=1080)');
+    expect(run.evidence[0].compressed).toContain('Unsplash');
+  });
+
   it('gracefully degrades an enabled dimension whose runner is missing (no crash)', async () => {
     const bus = makeEventBus();
     const deps = fakeDeps(); // only the web runner is configured

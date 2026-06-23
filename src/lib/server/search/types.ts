@@ -5,6 +5,9 @@ export interface SourceResult {
   title: string;
   snippet: string;
   publishedAt?: string;
+  /** Set by media runners (e.g. Unsplash): the embeddable image src. Its presence
+   *  tells the pipeline to render a Markdown figure instead of fetching+compressing. */
+  imageUrl?: string;
 }
 
 export interface SourceRunner {

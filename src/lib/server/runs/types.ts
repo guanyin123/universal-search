@@ -10,11 +10,11 @@ export type RunStatus =
   | 'done'
   | 'error';
 
-/** Dimensions the planner can model. v2 adds peoples_writing (Exa) and community
- *  (Reddit + HN); web is v1. */
-export type DimensionKey = 'web' | 'peoples_writing' | 'community';
+/** Dimensions the planner can model. v2 adds peoples_writing (Exa), community
+ *  (Reddit + HN), and images (Unsplash); web is v1. */
+export type DimensionKey = 'web' | 'peoples_writing' | 'community' | 'images';
 /** Search APIs backing a source. ('community' fans out to Reddit + HN.) */
-export type SourceApi = 'tavily' | 'exa' | 'community';
+export type SourceApi = 'tavily' | 'exa' | 'community' | 'unsplash';
 
 export interface PlanSource {
   id: string;

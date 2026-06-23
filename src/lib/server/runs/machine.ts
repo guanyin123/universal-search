@@ -15,10 +15,11 @@ const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const DIMENSION_LABELS: Record<DimensionKey, string> = {
   web: 'Web',
   peoples_writing: '他人写作',
-  community: '社区'
+  community: '社区',
+  images: '图片'
 };
 // Proposal order; only dimensions with a configured runner are actually used.
-const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing', 'community'];
+const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing', 'community', 'images'];
 
 export async function startRun(
   input: { question: string; models: { fanout: string; synth: string } },
@@ -118,13 +119,24 @@ export async function runPlan(
             // the later dimension's instance is dropped. Acceptable for v2.
             if (seenUrls.has(r.url)) continue;
             seenUrls.add(r.url);
-            const md = await deps.extract(r.url);
-            const compressed = await deps.llm.complete({
-              role: 'fanout',
-              model: run.models.fanout,
-              prompt: buildCompressPrompt(run.question, r.title, md || r.snippet)
-            });
-            if (compressed.trim() === 'IRRELEVANT') continue;
+
+            let compressed: string;
+            if (r.imageUrl) {
+              // Media result (e.g. an Unsplash photo): there's nothing to fetch or
+              // text-compress — the text model can't "see" the image. Store an
+              // embeddable Markdown figure + attribution directly so the synthesizer
+              // can place it inline.
+              compressed = `![${r.title}](${r.imageUrl})` + (r.snippet ? `\n${r.snippet}` : '');
+            } else {
+              const md = await deps.extract(r.url);
+              const c = await deps.llm.complete({
+                role: 'fanout',
+                model: run.models.fanout,
+                prompt: buildCompressPrompt(run.question, r.title, md || r.snippet)
+              });
+              if (c.trim() === 'IRRELEVANT') continue;
+              compressed = c;
+            }
             evidence.push({
               sourceId: src.id,
               dimension: dim.key,

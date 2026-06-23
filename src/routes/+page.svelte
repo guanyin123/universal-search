@@ -181,7 +181,7 @@
 		await fetch(`/api/run/${runId}/deposit`, { method: 'POST' });
 	}
 
-	const DIM_API = { web: 'tavily', peoples_writing: 'exa', community: 'community' } as const;
+	const DIM_API = { web: 'tavily', peoples_writing: 'exa', community: 'community', images: 'unsplash' } as const;
 	function addSource(di: number) {
 		const dim = plan!.dimensions[di];
 		dim.sources.push({

@@ -3,6 +3,7 @@ import { makeLlm, type Llm } from '../llm/client';
 import { makeTavilyRunner } from '../search/tavily';
 import { makeExaRunner } from '../search/exa';
 import { makeCommunityRunner } from '../search/community';
+import { makeUnsplashRunner } from '../search/unsplash';
 import { makeJinaExtractor } from '../search/jina';
 import { readVaultLibrary, type VaultLibrary } from '../vault/library';
 import { makeRunStore, type RunStore } from './store';
@@ -14,9 +15,9 @@ export interface MachineDeps {
   vaultRoot: string;
   llm: Llm;
   /** Source runners keyed by dimension. web is always present; peoples_writing
-   *  (Exa) only when EXA_API_KEY is configured; community (Reddit+HN, keyless)
-   *  only when COMMUNITY_ENABLED=true — absent dimensions are simply never
-   *  proposed or rendered (graceful degrade). */
+   *  (Exa) only when EXA_API_KEY is set; community (Reddit+HN, keyless) only when
+   *  COMMUNITY_ENABLED=true; images (Unsplash) only when UNSPLASH_ACCESS_KEY is set
+   *  — absent dimensions are simply never proposed or rendered (graceful degrade). */
   runners: Partial<Record<DimensionKey, SourceRunner>>;
   extract: (url: string) => Promise<string>;
   /** Reads the vault's existing notes → tag vocabulary + related-link candidates.
@@ -33,6 +34,7 @@ export function realDeps(): MachineDeps {
   };
   if (cfg.exa.apiKey) runners.peoples_writing = makeExaRunner(cfg.exa.apiKey);
   if (cfg.community.enabled) runners.community = makeCommunityRunner();
+  if (cfg.unsplash.accessKey) runners.images = makeUnsplashRunner(cfg.unsplash.accessKey);
   return {
     vaultRoot: cfg.vaultRoot,
     llm: makeLlm(cfg.llm),

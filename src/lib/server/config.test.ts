@@ -36,6 +36,11 @@ describe('loadConfig', () => {
     expect(loadConfig(base).community.enabled).toBe(false);
   });
 
+  it('parses UNSPLASH_ACCESS_KEY when present and is undefined when absent', () => {
+    expect(loadConfig({ ...base, UNSPLASH_ACCESS_KEY: 'uns-x' }).unsplash.accessKey).toBe('uns-x');
+    expect(loadConfig(base).unsplash.accessKey).toBeUndefined();
+  });
+
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);

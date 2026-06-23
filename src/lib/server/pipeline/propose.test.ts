@@ -19,6 +19,12 @@ describe('buildProposePrompt', () => {
     expect(p).toContain('How does RAG work?');
     expect(p.toLowerCase()).toMatch(/reddit|hacker news|forum|discussion/);
   });
+
+  it('images variant targets visual image search', () => {
+    const p = buildProposePrompt('How does RAG work?', 'images');
+    expect(p).toContain('How does RAG work?');
+    expect(p.toLowerCase()).toMatch(/image|unsplash|photo|visual/);
+  });
 });
 
 describe('parseProposedQueries', () => {

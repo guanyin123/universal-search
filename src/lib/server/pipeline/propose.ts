@@ -25,6 +25,17 @@ export function buildProposePrompt(question: string, dimension: DimensionKey = '
       `Question: ${question}`
     ].join('\n');
   }
+  if (dimension === 'images') {
+    return [
+      'You plan an image search (Unsplash) for photos that would illustrate a',
+      'research report on the question — concrete visual subjects, scenes, or',
+      'objects, NOT abstract phrases.',
+      'Output ONLY a JSON array of 1-2 short visual search query strings.',
+      'No prose, no keys — just the array.',
+      '',
+      `Question: ${question}`
+    ].join('\n');
+  }
   return [
     'You plan web searches for a research question.',
     'Output ONLY a JSON array of 2-3 concise, high-signal web search query strings',
