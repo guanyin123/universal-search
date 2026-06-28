@@ -21,6 +21,9 @@ Thumbs.db
 # Local run artifacts
 .runs/
 
+# Settings store (SQLite DB + encryption key) — channels, AI provider keys
+.data/
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

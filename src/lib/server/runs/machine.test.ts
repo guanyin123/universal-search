@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeRunStore } from './store';
 import { makeEventBus } from '../events';
-import { startRun, runPlan } from './machine';
+import { startRun, runPlan, runGithubSearch } from './machine';
 import type { MachineDeps } from './deps';
 
 let dir: string;
@@ -293,5 +293,84 @@ describe('runPlan', () => {
     expect(
       events.some((e) => e.phase === 'querying' && e.status === 'fail' && e.sourceId === 'peoples_writing-1')
     ).toBe(true);
+  });
+});
+
+describe('github mode', () => {
+  function githubDeps(over: Partial<MachineDeps> = {}, ghResults: any[] = []): MachineDeps {
+    return fakeDeps({
+      runners: {
+        github: { dimension: 'github', api: 'github', run: vi.fn(async () => ghResults) }
+      } as any,
+      llm: {
+        complete: vi.fn(async ({ role }: any) =>
+          role === 'fanout' ? '["vector db"]' : '[{"name":"o/small","reputation":10,"reason":"loved"},{"name":"o/big","reputation":1,"reason":"stale"}]'
+        ),
+        stream: vi.fn()
+      } as any,
+      ...over
+    });
+  }
+  const twoRepos = [
+    { url: 'https://github.com/o/big', title: 'o/big', snippet: 'big', stars: 9000 },
+    { url: 'https://github.com/o/small', title: 'o/small', snippet: 'small', stars: 50 }
+  ];
+
+  it('startRun(github) proposes a single github dimension of repo queries', async () => {
+    const bus = makeEventBus();
+    const deps = githubDeps();
+    const run = await startRun({ question: 'a fast vector db', models: { fanout: 'f', synth: 's' } }, deps, bus, 'github');
+    expect(run.mode).toBe('github');
+    expect(run.status).toBe('awaiting_edit');
+    expect(run.plan.dimensions.map((d) => d.key)).toEqual(['github']);
+    expect(run.plan.dimensions[0].sources.every((s) => s.api === 'github')).toBe(true);
+  });
+
+  it('runGithubSearch searches, ranks by stars + reputation, and finishes at done with top repos', async () => {
+    const bus = makeEventBus();
+    const deps = githubDeps({}, twoRepos);
+    const phases: string[] = [];
+    const run0 = await startRun({ question: 'q', models: { fanout: 'f', synth: 's' } }, deps, bus, 'github');
+    bus.subscribe(run0.id, (e) => phases.push(e.phase));
+    const run = await runGithubSearch(run0.id, run0.plan, deps, bus);
+
+    expect(run.status).toBe('done');
+    expect(run.repos).toHaveLength(2);
+    // reputation 10 lifts o/small above o/big's raw star count
+    expect(run.repos?.[0].fullName).toBe('o/small');
+    expect(run.repos?.[0].reason).toBe('loved');
+    expect(run.evidence).toHaveLength(0); // github tail never extracts/compresses
+    expect(phases).toContain('querying');
+    expect(phases).toContain('done');
+  });
+
+  it('aborts with an error when GitHub yields no candidates', async () => {
+    const bus = makeEventBus();
+    const deps = githubDeps({}, []);
+    const run0 = await startRun({ question: 'q', models: { fanout: 'f', synth: 's' } }, deps, bus, 'github');
+    const run = await runGithubSearch(run0.id, run0.plan, deps, bus);
+    expect(run.status).toBe('error');
+    expect(run.repos).toBeUndefined();
+  });
+
+  it('falls back to a stars-only ranking when the reputation judge fails', async () => {
+    const bus = makeEventBus();
+    const deps = githubDeps(
+      {
+        llm: {
+          complete: vi.fn(async ({ role }: any) => {
+            if (role === 'fanout') return '["q"]';
+            throw new Error('synth down');
+          }),
+          stream: vi.fn()
+        } as any
+      },
+      twoRepos
+    );
+    const run0 = await startRun({ question: 'q', models: { fanout: 'f', synth: 's' } }, deps, bus, 'github');
+    const run = await runGithubSearch(run0.id, run0.plan, deps, bus);
+    expect(run.status).toBe('done');
+    expect(run.repos?.[0].fullName).toBe('o/big'); // most stars first
+    expect(run.repos?.every((r) => r.reputation === 5)).toBe(true);
   });
 });

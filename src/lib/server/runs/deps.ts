@@ -1,9 +1,11 @@
 import { getConfig } from '../runtime-config';
+import { resolveLlmConfig } from '../settings';
 import { makeLlm, type Llm } from '../llm/client';
 import { makeTavilyRunner } from '../search/tavily';
 import { makeExaRunner } from '../search/exa';
 import { makeCommunityRunner } from '../search/community';
 import { makeUnsplashRunner } from '../search/unsplash';
+import { makeGithubRunner } from '../search/github';
 import { makeJinaExtractor } from '../search/jina';
 import { readVaultLibrary, type VaultLibrary } from '../vault/library';
 import { makeRunStore, type RunStore } from './store';
@@ -30,14 +32,18 @@ export interface MachineDeps {
 export function realDeps(): MachineDeps {
   const cfg = getConfig();
   const runners: Partial<Record<DimensionKey, SourceRunner>> = {
-    web: makeTavilyRunner(cfg.tavily.apiKey)
+    web: makeTavilyRunner(cfg.tavily.apiKey),
+    // github is always registered (keyless works anonymously). It's used only by the
+    // github-mode functions — it is NOT in DIMENSION_ORDER, so report mode never sees it.
+    github: makeGithubRunner(cfg.github.token)
   };
   if (cfg.exa.apiKey) runners.peoples_writing = makeExaRunner(cfg.exa.apiKey);
   if (cfg.community.enabled) runners.community = makeCommunityRunner();
   if (cfg.unsplash.accessKey) runners.images = makeUnsplashRunner(cfg.unsplash.accessKey);
   return {
     vaultRoot: cfg.vaultRoot,
-    llm: makeLlm(cfg.llm),
+    // LLM config comes from the active channel (settings store), falling back to env.
+    llm: makeLlm(resolveLlmConfig()),
     runners,
     extract: makeJinaExtractor(cfg.jina.apiKey),
     readLibrary: () => readVaultLibrary(cfg.vaultRoot),

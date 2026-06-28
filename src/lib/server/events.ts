@@ -1,4 +1,4 @@
-import type { RunPlan, DepositFile } from './runs/types';
+import type { RunPlan, DepositFile, RankedRepo } from './runs/types';
 
 export type RunEvent =
   | { phase: 'proposing' }
@@ -6,7 +6,8 @@ export type RunEvent =
   | { phase: 'querying'; sourceId: string; status: 'start' | 'ok' | 'fail'; title?: string }
   | { phase: 'synthesizing'; delta?: string }
   | { phase: 'awaiting_deposit'; files: DepositFile[]; markdown: string }
-  | { phase: 'done'; reportPath: string; sha?: string }
+  // 'done' carries reportPath for report mode, or repos for github mode.
+  | { phase: 'done'; reportPath?: string; sha?: string; repos?: RankedRepo[] }
   | { phase: 'error'; message: string }
   | { phase: 'heartbeat' };
 

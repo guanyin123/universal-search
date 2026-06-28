@@ -46,6 +46,24 @@ export function buildProposePrompt(question: string, dimension: DimensionKey = '
   ].join('\n');
 }
 
+/**
+ * Propose GitHub repository search queries for the github tool-search mode. Encourages
+ * GitHub search qualifiers (language:, stars:>N, topic:) and keyword phrasing — these
+ * are repo-search strings, not natural-language questions. Reuses parseProposedQueries.
+ */
+export function buildGithubProposePrompt(question: string): string {
+  return [
+    'You plan a search for open-source TOOLS on GitHub that solve a user need.',
+    'Output ONLY a JSON array of 2-3 GitHub repository-search query strings that',
+    'surface the strongest candidate tools from complementary angles.',
+    'Use keywords (not a sentence) and GitHub search qualifiers where helpful,',
+    'e.g. `language:rust`, `stars:>500`, `topic:cli`.',
+    'No prose, no keys — just the array.',
+    '',
+    `Need: ${question}`
+  ].join('\n');
+}
+
 export function parseProposedQueries(raw: string): string[] {
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) throw new Error(`Could not parse query array from model output: ${raw.slice(0, 120)}`);

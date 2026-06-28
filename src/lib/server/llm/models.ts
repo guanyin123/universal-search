@@ -1,8 +1,9 @@
-import type { AppConfig } from '../config';
+/** The bits of an LLM config `listModels` needs (a resolved channel or env). */
+export type ModelSource = { baseURL: string; apiKey: string; models: string[] };
 
 /** List selectable model ids. Tries the provider's OpenAI-compatible /models, falls back to cfg.models. */
 export async function listModels(
-  cfg: AppConfig['llm'],
+  cfg: ModelSource,
   fetchFn: typeof fetch = fetch
 ): Promise<string[]> {
   try {

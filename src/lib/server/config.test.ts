@@ -41,9 +41,24 @@ describe('loadConfig', () => {
     expect(loadConfig(base).unsplash.accessKey).toBeUndefined();
   });
 
+  it('parses GITHUB_TOKEN when present and is undefined when absent (anonymous)', () => {
+    expect(loadConfig({ ...base, GITHUB_TOKEN: 'ghp-x' }).github.token).toBe('ghp-x');
+    expect(loadConfig(base).github.token).toBeUndefined();
+  });
+
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);
+  });
+
+  it('treats LLM_* as optional (channels are the source of truth) — no throw when absent', () => {
+    const { LLM_BASE_URL, LLM_API_KEY, FANOUT_MODEL, SYNTH_MODEL, ...minimal } = base;
+    const cfg = loadConfig(minimal);
+    expect(cfg.llm.baseURL).toBeUndefined();
+    expect(cfg.llm.apiKey).toBeUndefined();
+    expect(cfg.llm.fanoutModel).toBeUndefined();
+    expect(cfg.llm.synthModel).toBeUndefined();
+    expect(cfg.llm.models).toEqual([]);
   });
 });
 

@@ -21,6 +21,7 @@ function workflow(over: Partial<WorkflowDoc> = {}): WorkflowDoc {
     id: 'wf-x',
     name: 'X',
     version: 1,
+    mode: 'report',
     archetype: 'smart-default',
     questionPattern: 'orig pattern',
     dimensions: [{ key: 'web', label: 'Web' }],
@@ -107,5 +108,35 @@ describe('replayWorkflow', () => {
     // synthesis used the workflow's own prompt + the new question
     expect(synthPrompt).toContain('WORKFLOW-SPECIFIC-PROMPT');
     expect(synthPrompt).toContain('NEWQ');
+  });
+
+  it('dispatches a github-mode workflow to the ranked-repos tail (not runPlan)', async () => {
+    const gh = workflow({
+      mode: 'github',
+      dimensions: [{ key: 'github', label: 'GitHub' }],
+      sources: [{ dimension: 'github', api: 'github', query: '{{question}} cli' }]
+    });
+    const deps = fakeDeps({
+      runners: {
+        github: {
+          dimension: 'github',
+          api: 'github',
+          run: vi.fn(async () => [
+            { url: 'https://github.com/o/a', title: 'o/a', snippet: 'd', stars: 900 }
+          ])
+        }
+      } as any,
+      // synth model returns reputation judgments
+      llm: {
+        complete: vi.fn(async () => '[{"name":"o/a","reputation":8,"reason":"solid"}]'),
+        stream: vi.fn()
+      } as any
+    });
+    const bus = makeEventBus();
+    const run = await replayWorkflow(gh, { question: 'a cli tool' }, deps, bus);
+    expect(run.status).toBe('done');
+    expect(run.mode).toBe('github');
+    expect(run.repos?.[0].fullName).toBe('o/a');
+    expect(run.evidence).toHaveLength(0); // github tail never builds evidence
   });
 });

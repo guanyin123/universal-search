@@ -101,6 +101,23 @@ describe('buildWorkflowDoc', () => {
     expect(d2.id).toBe('wf-custom');
     expect(d2.name).toBe('RAG 调研范式');
   });
+
+  it('defaults mode to "report" and carries an explicit github mode through', () => {
+    expect(doc.mode).toBe('report');
+    const gh = buildWorkflowDoc(
+      sampleRun({
+        mode: 'github',
+        plan: {
+          dimensions: [
+            { key: 'github', label: 'GitHub', enabled: true, sources: [{ id: 'github-1', api: 'github', query: 'cli', enabled: true }] }
+          ]
+        }
+      })
+    );
+    expect(gh.mode).toBe('github');
+    expect(gh.dimensions.map((d) => d.key)).toEqual(['github']);
+    expect(gh.sources[0].api).toBe('github');
+  });
 });
 
 describe('planFromWorkflow', () => {

@@ -1,8 +1,8 @@
 import { generateText, streamText, type LanguageModel } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import type { AppConfig } from '../config';
+import type { LlmRuntimeConfig } from '../config';
 
-type LlmConfig = AppConfig['llm'];
+type LlmConfig = LlmRuntimeConfig;
 export type Role = 'fanout' | 'synth';
 
 export interface CompleteArgs {

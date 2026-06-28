@@ -1,4 +1,4 @@
-import type { DimensionKey, SourceApi } from '../runs/types';
+import type { DimensionKey, SourceApi, RunMode } from '../runs/types';
 import type { WorkflowDoc, WorkflowDimension, WorkflowSource, WorkflowRunRef } from './types';
 
 /**
@@ -50,6 +50,7 @@ export function serializeWorkflowDoc(doc: WorkflowDoc): string {
   fm.push(`id: ${emitScalar(doc.id)}`);
   fm.push(`name: ${emitScalar(doc.name)}`);
   fm.push(`version: ${doc.version}`);
+  fm.push(`mode: ${emitScalar(doc.mode ?? 'report')}`);
   fm.push(`archetype: ${emitScalar(doc.archetype)}`);
   fm.push(`question_pattern: ${emitScalar(doc.questionPattern)}`);
   fm.push('model_config:');
@@ -219,6 +220,7 @@ export function parseWorkflowDoc(md: string): WorkflowDoc | null {
     id,
     name,
     version: Number(asStr(fm.version)) || 1,
+    mode: (asStr(fm.mode) as RunMode) || 'report',
     archetype: asStr(fm.archetype) || 'smart-default',
     questionPattern: asStr(fm.question_pattern),
     dimensions,

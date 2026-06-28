@@ -7,6 +7,7 @@ function sampleDoc(over: Partial<WorkflowDoc> = {}): WorkflowDoc {
     id: 'wf-rag',
     name: 'RAG 调研',
     version: 1,
+    mode: 'report',
     archetype: 'smart-default',
     questionPattern: 'How does RAG improve accuracy?',
     dimensions: [
@@ -50,6 +51,24 @@ describe('serialize/parse round-trip', () => {
     const doc = sampleDoc();
     const round = parseWorkflowDoc(serializeWorkflowDoc(doc));
     expect(round?.synthesisPrompt).toBe(doc.synthesisPrompt);
+  });
+
+  it('round-trips a github-mode workflow', () => {
+    const doc = sampleDoc({
+      mode: 'github',
+      dimensions: [{ key: 'github', label: 'GitHub' }],
+      sources: [{ dimension: 'github', api: 'github', query: '{{question}} language:rust stars:>500' }]
+    });
+    const round = parseWorkflowDoc(serializeWorkflowDoc(doc));
+    expect(round?.mode).toBe('github');
+    expect(round?.sources[0].api).toBe('github');
+    expect(round).toEqual(doc);
+  });
+
+  it('defaults mode to "report" when the frontmatter has no mode key (legacy docs)', () => {
+    const md = serializeWorkflowDoc(sampleDoc()).replace(/^mode: .*$\n/m, '');
+    expect(md).not.toContain('mode:');
+    expect(parseWorkflowDoc(md)?.mode).toBe('report');
   });
 });
 

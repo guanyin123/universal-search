@@ -11,6 +11,7 @@ function sampleDoc(over: Partial<WorkflowDoc> = {}): WorkflowDoc {
     id: 'wf-rag',
     name: 'RAG 调研',
     version: 1,
+    mode: 'report',
     archetype: 'smart-default',
     questionPattern: 'How does RAG work?',
     dimensions: [{ key: 'web', label: 'Web' }],

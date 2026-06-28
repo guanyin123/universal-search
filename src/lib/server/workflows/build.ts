@@ -66,6 +66,7 @@ export function buildWorkflowDoc(run: Run, opts: { name?: string; id?: string } 
     id,
     name,
     version: 1,
+    mode: run.mode ?? 'report',
     archetype: run.report?.templateKey ?? 'smart-default',
     questionPattern,
     dimensions,

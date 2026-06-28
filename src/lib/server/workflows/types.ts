@@ -1,4 +1,4 @@
-import type { DimensionKey, SourceApi } from '../runs/types';
+import type { DimensionKey, SourceApi, RunMode } from '../runs/types';
 
 /** A reusable search source — a query template (may contain the {{question}}
  *  placeholder) bound to a dimension + API. */
@@ -31,6 +31,8 @@ export interface WorkflowDoc {
   id: string;
   name: string;
   version: number;
+  /** Which track this workflow replays. Legacy docs without it parse as 'report'. */
+  mode: RunMode;
   archetype: string;
   questionPattern: string;
   dimensions: WorkflowDimension[];
@@ -49,6 +51,7 @@ export interface WorkflowSummary {
   slug: string;
   id: string;
   name: string;
+  mode: RunMode;
   archetype: string;
   questionPattern: string;
 }

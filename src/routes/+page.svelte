@@ -3,11 +3,36 @@
 	import { browser } from '$app/environment';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
+	import GithubMode from '$lib/GithubMode.svelte';
+	import ReportResult from '$lib/ReportResult.svelte';
+	import QuickSearchMode from '$lib/QuickSearchMode.svelte';
+	import ChannelSettings from '$lib/ChannelSettings.svelte';
 
 	type Source = { id: string; api: string; query: string; enabled: boolean };
 	type Plan = { dimensions: { key: string; label: string; enabled: boolean; sources: Source[] }[] };
-	type Models = { models: string[]; defaults: { fanout: string; synth: string }; baseURL?: string };
+	type Models = {
+		models: string[];
+		defaults: { fanout: string; synth: string };
+		baseURL?: string;
+		needsSetup?: boolean;
+	};
+	type Channel = { id: string; name: string; baseURL: string };
 	type DepositFile = { path: string; kind: string };
+	type SearchMode = 'report' | 'github' | 'quick';
+	type QuickResult = { url: string; title: string; snippet: string; publishedAt?: string };
+	type Repo = {
+		url: string;
+		fullName: string;
+		description: string;
+		stars: number;
+		language?: string;
+		license?: string;
+		pushedAt?: string;
+		topics?: string[];
+		reputation: number;
+		score: number;
+		reason: string;
+	};
 
 	// run state
 	let question = $state('');
@@ -25,15 +50,30 @@
 	// ui state
 	let mode = $state('light');
 	let settingsOpen = $state(false);
+	let channelsOpen = $state(false);
 	let reportView = $state<'preview' | 'source'>('preview');
+
+	// search mode (report ↔ github tool search ↔ quick web search)
+	let searchMode = $state<SearchMode>('report');
+	let repos = $state<Repo[]>([]);
+
+	// quick search (plain search-engine pass — synchronous, no run/SSE)
+	// null = not searched yet; [] = searched, no results
+	let quickResults = $state<QuickResult[] | null>(null);
+	let quickLoading = $state(false);
 
 	// models
 	let models = $state<Models | null>(null);
 	let fanoutModel = $state('');
 	let synthModel = $state('');
+	let needsSetup = $state(false);
+
+	// channels (AI provider settings — base_url/key/model, replaces .env)
+	let channels = $state<Channel[]>([]);
+	let activeChannelId = $state<string | null>(null);
 
 	// workflows (v3)
-	type WorkflowItem = { slug: string; name: string; questionPattern: string };
+	type WorkflowItem = { slug: string; name: string; questionPattern: string; mode?: SearchMode };
 	let workflows = $state<WorkflowItem[]>([]);
 	let savingWorkflow = $state(false);
 	let savedMsg = $state('');
@@ -41,6 +81,7 @@
 	onMount(() => {
 		mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
 		loadModels();
+		loadChannels();
 		loadWorkflows();
 	});
 
@@ -60,11 +101,31 @@
 			const r = await fetch('/api/models');
 			if (!r.ok) return;
 			models = await r.json();
+			needsSetup = models?.needsSetup ?? false;
 			fanoutModel = models!.defaults.fanout;
 			synthModel = models!.defaults.synth;
 		} catch {
 			/* selectors stay empty; not fatal */
 		}
+	}
+
+	async function loadChannels() {
+		try {
+			const r = await fetch('/api/channels');
+			if (!r.ok) return;
+			const d = await r.json();
+			channels = d.channels ?? [];
+			activeChannelId = d.activeId ?? null;
+		} catch {
+			/* not fatal */
+		}
+	}
+
+	const activeChannelName = $derived(channels.find((c) => c.id === activeChannelId)?.name ?? '');
+
+	function onChannelsChanged() {
+		loadModels();
+		loadChannels();
 	}
 
 	function toggleMode() {
@@ -101,12 +162,21 @@
 		phase = 'idle';
 		sourceStatus = {};
 		markdown = '';
+		repos = [];
 		depositFiles = [];
 		reportPath = '';
 		errorMsg = '';
 		depositing = false;
 		savingWorkflow = false;
 		savedMsg = '';
+		quickResults = null;
+		quickLoading = false;
+	}
+
+	function switchMode(m: SearchMode) {
+		if (searchMode === m) return;
+		searchMode = m;
+		resetRun(); // a run belongs to one mode — don't carry state across the toggle
 	}
 
 	async function saveAsWorkflow() {
@@ -158,6 +228,7 @@
 		const data = await r.json();
 		runId = data.id;
 		plan = data.plan;
+		searchMode = data.mode ?? 'report';
 		phase = 'searching';
 		listen(data.id);
 	}
@@ -184,13 +255,39 @@
 				markdown = e.markdown;
 				depositFiles = e.files ?? [];
 			} else if (e.phase === 'done') {
-				reportPath = e.reportPath;
+				reportPath = e.reportPath ?? ''; if (e.repos) repos = e.repos;
 				es?.close();
 			} else if (e.phase === 'error') {
 				errorMsg = e.message;
 				es?.close();
 			}
 		};
+	}
+
+	async function quickSearch() {
+		if (!question.trim() || quickLoading) return;
+		resetRun();
+		quickLoading = true;
+		try {
+			const r = await fetch('/api/quick-search', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ query: question })
+			});
+			if (!r.ok) {
+				phase = 'error';
+				errorMsg = `搜索失败：HTTP ${r.status}`;
+				return;
+			}
+			const data = await r.json();
+			quickResults = data.results ?? [];
+			phase = 'done';
+		} catch {
+			phase = 'error';
+			errorMsg = '无法连接本地服务';
+		} finally {
+			quickLoading = false;
+		}
 	}
 
 	async function start() {
@@ -203,7 +300,7 @@
 			r = await fetch('/api/run', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ question, fanoutModel, synthModel })
+				body: JSON.stringify({ question, mode: searchMode, fanoutModel, synthModel })
 			});
 		} catch {
 			phase = 'error';
@@ -218,6 +315,7 @@
 		const data = await r.json();
 		runId = data.id;
 		plan = data.plan;
+		searchMode = data.mode ?? searchMode;
 		phase = data.status;
 		if (data.status === 'error') {
 			errorMsg = data.error ?? '启动失败';
@@ -292,28 +390,40 @@
 						></button>
 						<div class="pop">
 							<h3><i class="ph ph-gear-six"></i> 模型设置</h3>
-							<p class="note">一般无需频繁调整，默认值来自 .env。</p>
+							<p class="note">{activeChannelName ? `当前渠道：${activeChannelName}` : '尚未配置 AI 渠道'}</p>
 							{#if providerHost}
 								<div class="provider">提供商主机 <b>{providerHost}</b></div>
 							{/if}
-							<div class="grp">
-								<label class="fld" for="fanout">铺广度模型（便宜 · 提查询/压缩/打标签）</label>
-								<div class="selrow">
-									<select id="fanout" bind:value={fanoutModel}>
-										{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
-									</select>
-									<i class="ph ph-caret-down caret"></i>
+							<button
+								class="btn btn-ghost"
+								style="width:100%;justify-content:center;margin-bottom:13px"
+								onclick={() => {
+									settingsOpen = false;
+									channelsOpen = true;
+								}}
+							>
+								<i class="ph ph-plugs-connected"></i> 管理渠道…
+							</button>
+							{#if models?.models?.length}
+								<div class="grp">
+									<label class="fld" for="fanout">铺广度模型（便宜 · 提查询/压缩/打标签）</label>
+									<div class="selrow">
+										<select id="fanout" bind:value={fanoutModel}>
+											{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
+										</select>
+										<i class="ph ph-caret-down caret"></i>
+									</div>
 								</div>
-							</div>
-							<div class="grp">
-								<label class="fld" for="synth">收口模型（强 · 综合报告）</label>
-								<div class="selrow">
-									<select id="synth" bind:value={synthModel}>
-										{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
-									</select>
-									<i class="ph ph-caret-down caret"></i>
+								<div class="grp">
+									<label class="fld" for="synth">收口模型（强 · 综合报告）</label>
+									<div class="selrow">
+										<select id="synth" bind:value={synthModel}>
+											{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
+										</select>
+										<i class="ph ph-caret-down caret"></i>
+									</div>
 								</div>
-							</div>
+							{/if}
 							<button class="btn btn-soft" style="width:100%;justify-content:center" onclick={() => (settingsOpen = false)}>完成</button>
 						</div>
 					{/if}
@@ -322,14 +432,32 @@
 		</div>
 
 		<div class="body">
-			<label class="fld" for="q">想了解点什么？</label>
-			<textarea id="q" rows="2" bind:value={question} placeholder="提出你的问题…"></textarea>
-			<div class="toolbar-between" style="margin-top:12px">
-				<span class="dim">维度可编辑</span>
-				<button class="btn btn-primary" onclick={start} disabled={!question.trim() || phase === 'proposing'}>
-					{#if phase === 'proposing'}<span class="spin"></span> 生成中…{:else}生成搜索计划 <i class="ph ph-arrow-right"></i>{/if}
-				</button>
+			<div class="seg mode-seg">
+				<button class:on={searchMode === 'report'} onclick={() => switchMode('report')}><i class="ph ph-article"></i> 报告搜索</button>
+				<button class:on={searchMode === 'github'} onclick={() => switchMode('github')}><i class="ph ph-github-logo"></i> GitHub 工具</button>
+				<button class:on={searchMode === 'quick'} onclick={() => switchMode('quick')}><i class="ph ph-lightning"></i> 快速搜索</button>
 			</div>
+			<label class="fld" for="q">{searchMode === 'github' ? '想找什么工具？' : searchMode === 'quick' ? '搜索任何内容' : '想了解点什么？'}</label>
+			<textarea id="q" rows="2" bind:value={question} placeholder={searchMode === 'github' ? '描述你的需求，如：一个快速的本地向量数据库…' : searchMode === 'quick' ? '输入关键词，直达网页结果…' : '提出你的问题…'}></textarea>
+			<div class="toolbar-between" style="margin-top:12px">
+				<span class="dim">{searchMode === 'github' ? '始终搜索 GitHub' : searchMode === 'quick' ? '直接搜索网页，无需设置' : '维度可编辑'}</span>
+				{#if searchMode === 'quick'}
+					<button class="btn btn-primary" onclick={quickSearch} disabled={!question.trim() || quickLoading}>
+						{#if quickLoading}<span class="spin"></span> 搜索中…{:else}搜索 <i class="ph ph-magnifying-glass"></i>{/if}
+					</button>
+				{:else}
+					<button class="btn btn-primary" onclick={start} disabled={!question.trim() || phase === 'proposing'}>
+						{#if phase === 'proposing'}<span class="spin"></span> 生成中…{:else}{searchMode === 'github' ? '生成 GitHub 查询' : '生成搜索计划'} <i class="ph ph-arrow-right"></i>{/if}
+					</button>
+				{/if}
+			</div>
+
+			{#if needsSetup && searchMode !== 'quick'}
+				<button class="setup-hint" onclick={() => (channelsOpen = true)}>
+					<i class="ph ph-warning-circle"></i>
+					<span>尚未配置 AI 渠道 — 报告/GitHub 模式需要一个 AI 模型。点此添加渠道。</span>
+				</button>
+			{/if}
 
 			<!-- 已存工作流：输入问题后可直接回放（跳过提问/编辑计划） -->
 			{#if phase === 'idle' && workflows.length}
@@ -346,7 +474,7 @@
 							disabled={!question.trim()}
 							title={question.trim() ? '用上面的问题回放此工作流' : '先输入问题再回放'}
 						>
-							<i class="ph ph-lightning"></i>
+							<i class="ph {wf.mode === 'github' ? 'ph-github-logo' : 'ph-lightning'}"></i>
 							<span style="font-weight:600">{wf.name}</span>
 							<span class="dim" style="margin-left:auto;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{wf.questionPattern}</span>
 						</button>
@@ -354,6 +482,7 @@
 				</div>
 			{/if}
 
+			{#if searchMode === 'report'}
 			<!-- 搜索计划（可编辑） -->
 			{#if plan && phase === 'awaiting_edit'}
 				<div class="plan-head">
@@ -420,58 +549,33 @@
 				</ul>
 			{/if}
 
-			<!-- 报告：预览 / 源码 -->
-			{#if (phase === 'awaiting_deposit' || phase === 'done') && markdown}
-				<div class="row" style="justify-content:space-between;margin-top:22px">
-					<div class="seg">
-						<button class:on={reportView === 'preview'} onclick={() => (reportView = 'preview')}><i class="ph ph-article"></i> 预览</button>
-						<button class:on={reportView === 'source'} onclick={() => (reportView = 'source')}><i class="ph ph-code"></i> Markdown 源码</button>
-					</div>
-					<span class="dim">{rawCount} 条来源</span>
-				</div>
-				<div class="report">
-					<div class="meta">
-						<span class="pill">type: synthesis</span>
-						<span class="pill">{rawCount} 条来源</span>
-						<span style="margin-left:auto">将写入 second brain</span>
-					</div>
-					{#if reportView === 'preview'}
-						<div class="doc">{@html renderedReport}</div>
-					{:else}
-						<pre class="src-code">{markdown}</pre>
-					{/if}
-				</div>
-
-				{#if phase === 'awaiting_deposit'}
-					<div class="deposit-bar">
-						<div>
-							<div class="where">将写入 <code>{willWritePath}</code></div>
-							<div class="note-line warn" style="margin-top:4px">
-								<i class="ph ph-info"></i> 沉淀前请确保 vault 工作区干净，否则会安全中止
-							</div>
-						</div>
-						<button class="btn btn-primary" onclick={deposit} disabled={depositing}>
-							{#if depositing}<span class="spin"></span> 沉淀中…{:else}<i class="ph ph-tray-arrow-down"></i> 确认沉淀进第二大脑{/if}
-						</button>
-					</div>
-				{/if}
-			{/if}
-
-			<!-- 另存为工作流：成功 run 后可凝固成可复用工作流 -->
-			{#if (phase === 'awaiting_deposit' || phase === 'done') && markdown}
-				<div class="row" style="justify-content:space-between;margin-top:12px">
-					<span class="dim">{savedMsg}</span>
-					<button class="btn btn-ghost" onclick={saveAsWorkflow} disabled={savingWorkflow}>
-						{#if savingWorkflow}<span class="spin"></span> 保存中…{:else}<i class="ph ph-floppy-disk"></i> 另存为工作流{/if}
-					</button>
-				</div>
-			{/if}
-
-			<!-- 完成 -->
-			{#if phase === 'done'}
-				<div class="done-banner">
-					<i class="ph ph-check-circle"></i> 已沉淀：<code>{reportPath}</code>
-				</div>
+			<ReportResult
+				{phase}
+				{markdown}
+				{renderedReport}
+				bind:reportView
+				{rawCount}
+				{willWritePath}
+				{reportPath}
+				{depositing}
+				{savingWorkflow}
+				{savedMsg}
+				onDeposit={deposit}
+				onSave={saveAsWorkflow}
+			/>
+			{:else if searchMode === 'github'}
+			<GithubMode
+				{phase}
+				bind:plan
+				{sourceChips}
+				{repos}
+				{savingWorkflow}
+				{savedMsg}
+				onRun={runIt}
+				onSave={saveAsWorkflow}
+			/>
+			{:else}
+			<QuickSearchMode loading={quickLoading} results={quickResults} />
 			{/if}
 
 			<!-- 出错 -->
@@ -483,3 +587,7 @@
 		</div>
 	</div>
 </div>
+
+{#if channelsOpen}
+	<ChannelSettings onClose={() => (channelsOpen = false)} onChanged={onChannelsChanged} />
+{/if}

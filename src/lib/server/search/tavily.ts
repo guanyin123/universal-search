@@ -7,7 +7,11 @@ interface TavilyResult {
   published_date?: string;
 }
 
-export function makeTavilyRunner(apiKey: string, fetchFn: typeof fetch = fetch): SourceRunner {
+export function makeTavilyRunner(
+  apiKey: string,
+  fetchFn: typeof fetch = fetch,
+  maxResults = 5
+): SourceRunner {
   return {
     dimension: 'web',
     api: 'tavily',
@@ -18,7 +22,7 @@ export function makeTavilyRunner(apiKey: string, fetchFn: typeof fetch = fetch):
         body: JSON.stringify({
           query,
           search_depth: 'basic',
-          max_results: 5,
+          max_results: maxResults,
           include_answer: false
         })
       });

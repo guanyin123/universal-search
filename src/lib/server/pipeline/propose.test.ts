@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProposePrompt, parseProposedQueries } from './propose';
+import { buildProposePrompt, buildGithubProposePrompt, parseProposedQueries } from './propose';
 
 describe('buildProposePrompt', () => {
   it('embeds the question and asks for a JSON array of web queries', () => {
@@ -24,6 +24,16 @@ describe('buildProposePrompt', () => {
     const p = buildProposePrompt('How does RAG work?', 'images');
     expect(p).toContain('How does RAG work?');
     expect(p.toLowerCase()).toMatch(/image|unsplash|photo|visual/);
+  });
+});
+
+describe('buildGithubProposePrompt', () => {
+  it('embeds the need, asks for a JSON array, and encourages GitHub qualifiers', () => {
+    const p = buildGithubProposePrompt('a fast local vector database');
+    expect(p).toContain('a fast local vector database');
+    expect(p.toLowerCase()).toContain('json');
+    expect(p.toLowerCase()).toMatch(/github|repositor/);
+    expect(p).toMatch(/stars:|language:|topic:/);
   });
 });
 

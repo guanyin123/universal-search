@@ -4,7 +4,8 @@ const DIM_LABEL: Record<DimensionKey, string> = {
   web: 'Web',
   peoples_writing: '他人写作',
   community: '社区',
-  images: '图片'
+  images: '图片',
+  github: 'GitHub'
 };
 
 export const SMART_DEFAULT_SECTIONS = [

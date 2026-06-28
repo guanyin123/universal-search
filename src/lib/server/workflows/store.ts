@@ -68,6 +68,7 @@ export async function listWorkflows(vaultRoot: string): Promise<WorkflowSummary[
         slug: n.replace(/\.md$/, ''),
         id: doc.id,
         name: doc.name,
+        mode: doc.mode ?? 'report',
         archetype: doc.archetype,
         questionPattern: doc.questionPattern
       });

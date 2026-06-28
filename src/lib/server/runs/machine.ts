@@ -1,8 +1,10 @@
 import type { MachineDeps } from './deps';
 import type { EventBus } from '../events';
-import type { Run, RunPlan, Evidence, PlanSource, PlanDimension, DimensionKey } from './types';
+import type { Run, RunPlan, Evidence, PlanSource, PlanDimension, DimensionKey, RunMode } from './types';
+import type { SourceResult } from '../search/types';
 import { newRunId, slugify } from '../ids';
-import { buildProposePrompt, parseProposedQueries } from '../pipeline/propose';
+import { buildProposePrompt, buildGithubProposePrompt, parseProposedQueries } from '../pipeline/propose';
+import { buildRankPrompt, parseRankJudgments, rankRepos, type RepoJudgment } from '../pipeline/github-rank';
 import { buildCompressPrompt } from '../pipeline/compress';
 import { buildSynthesisPrompt } from '../pipeline/template';
 import { buildTagsPrompt, parseTags } from '../pipeline/tags';
@@ -23,21 +25,72 @@ const DIMENSION_LABELS: Record<DimensionKey, string> = {
   web: 'Web',
   peoples_writing: '他人写作',
   community: '社区',
-  images: '图片'
+  images: '图片',
+  github: 'GitHub'
 };
-// Proposal order; only dimensions with a configured runner are actually used.
+// Proposal order for REPORT mode; only dimensions with a configured runner are used.
+// NOTE: 'github' is intentionally absent — it's a separate mode, never a report dimension.
 const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing', 'community', 'images'];
 
+type ProposeInput = { question: string; models: { fanout: string; synth: string } };
+
+/** Report mode: propose queries for every configured dimension. A single dimension's
+ *  failure is skipped (not fatal) so e.g. an Exa hiccup never drops Web. */
+async function proposeReportDimensions(input: ProposeInput, deps: MachineDeps): Promise<PlanDimension[]> {
+  const available = DIMENSION_ORDER.filter((k) => deps.runners[k]);
+  const dimensions: PlanDimension[] = [];
+  for (const key of available) {
+    const runner = deps.runners[key]!;
+    try {
+      const raw = await deps.llm.complete({
+        role: 'fanout',
+        model: input.models.fanout,
+        prompt: buildProposePrompt(input.question, key)
+      });
+      const queries = parseProposedQueries(raw);
+      const sources: PlanSource[] = queries.map((q, i) => ({
+        id: `${key}-${i + 1}`,
+        api: runner.api,
+        query: q,
+        enabled: true
+      }));
+      dimensions.push({ key, label: DIMENSION_LABELS[key], enabled: true, sources });
+    } catch (err) {
+      console.warn(`[propose] dimension ${key} failed; skipping:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return dimensions;
+}
+
+/** github mode: a single 'github' dimension of repo-search queries (no dimension picking). */
+async function proposeGithubDimension(input: ProposeInput, deps: MachineDeps): Promise<PlanDimension[]> {
+  const raw = await deps.llm.complete({
+    role: 'fanout',
+    model: input.models.fanout,
+    prompt: buildGithubProposePrompt(input.question)
+  });
+  const queries = parseProposedQueries(raw);
+  const sources: PlanSource[] = queries.map((q, i) => ({
+    id: `github-${i + 1}`,
+    api: 'github',
+    query: q,
+    enabled: true
+  }));
+  return [{ key: 'github', label: DIMENSION_LABELS.github, enabled: true, sources }];
+}
+
 export async function startRun(
-  input: { question: string; models: { fanout: string; synth: string } },
+  input: ProposeInput,
   deps: MachineDeps,
-  bus: EventBus
+  bus: EventBus,
+  mode: RunMode = 'report'
 ): Promise<Run> {
   const id = newRunId();
   const run: Run = {
     id,
     createdAt: deps.now().toISOString(),
     status: 'proposing',
+    mode,
     question: input.question,
     models: input.models,
     plan: { dimensions: [] },
@@ -47,31 +100,10 @@ export async function startRun(
   bus.emit(id, { phase: 'proposing' });
 
   try {
-    // Propose queries for every configured dimension. A single dimension's
-    // failure is skipped (not fatal) so e.g. an Exa hiccup never drops Web;
-    // only if NO dimension yields queries do we abort.
-    const available = DIMENSION_ORDER.filter((k) => deps.runners[k]);
-    const dimensions: PlanDimension[] = [];
-    for (const key of available) {
-      const runner = deps.runners[key]!;
-      try {
-        const raw = await deps.llm.complete({
-          role: 'fanout',
-          model: input.models.fanout,
-          prompt: buildProposePrompt(input.question, key)
-        });
-        const queries = parseProposedQueries(raw);
-        const sources: PlanSource[] = queries.map((q, i) => ({
-          id: `${key}-${i + 1}`,
-          api: runner.api,
-          query: q,
-          enabled: true
-        }));
-        dimensions.push({ key, label: DIMENSION_LABELS[key], enabled: true, sources });
-      } catch (err) {
-        console.warn(`[propose] dimension ${key} failed; skipping:`, err instanceof Error ? err.message : err);
-      }
-    }
+    const dimensions =
+      mode === 'github'
+        ? await proposeGithubDimension(input, deps)
+        : await proposeReportDimensions(input, deps);
     if (dimensions.length === 0) {
       throw new Error('未能为任何维度生成搜索查询。');
     }
@@ -227,6 +259,88 @@ export async function runPlan(
 }
 
 /**
+ * github mode tail — run the GitHub source over each enabled query, collect candidate
+ * repos (dedup by url; NO Jina/compress, that's report-only), then rank by stars + a
+ * strong-model reputation judgment and keep the top 5. Ends at `done` carrying run.repos
+ * (no vault deposit). A separate same-level function so the report path stays untouched.
+ */
+export async function runGithubSearch(
+  runId: string,
+  editedPlan: RunPlan,
+  deps: MachineDeps,
+  bus: EventBus
+): Promise<Run> {
+  const run = await deps.store.get(runId);
+  if (!run) throw new Error(`run not found: ${runId}`);
+  run.plan = editedPlan;
+  run.mode = 'github';
+  run.status = 'searching';
+  await deps.store.save(run);
+
+  try {
+    const runner = deps.runners.github;
+    const candidates: SourceResult[] = [];
+    const seen = new Set<string>();
+    for (const dim of editedPlan.dimensions) {
+      if (!dim.enabled) continue;
+      for (const src of dim.sources) {
+        if (!src.enabled) continue;
+        bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'start' });
+        if (!runner) {
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'fail', title: src.query });
+          continue;
+        }
+        try {
+          const results = await runner.run(src.query);
+          for (const r of results) {
+            if (seen.has(r.url)) continue; // same repo surfaced by two queries — keep once
+            seen.add(r.url);
+            candidates.push(r);
+          }
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'ok', title: src.query });
+        } catch {
+          bus.emit(runId, { phase: 'querying', sourceId: src.id, status: 'fail', title: src.query });
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      throw new Error('GitHub 搜索无候选仓库，已中止。');
+    }
+
+    run.status = 'synthesizing';
+    await deps.store.save(run);
+    bus.emit(runId, { phase: 'synthesizing' });
+
+    // Rank by stars + a strong-model reputation judgment. If the judgment call fails,
+    // fall back to a stars-only ordering (empty map) so results still come through.
+    let judgments: Map<string, RepoJudgment> = new Map();
+    try {
+      const raw = await deps.llm.complete({
+        role: 'synth',
+        model: run.models.synth,
+        prompt: buildRankPrompt(run.question, candidates)
+      });
+      judgments = parseRankJudgments(raw);
+    } catch (err) {
+      console.warn(
+        '[github-rank] reputation judging failed; ranking by stars only:',
+        err instanceof Error ? err.message : err
+      );
+    }
+    const repos = rankRepos(candidates, judgments);
+
+    run.repos = repos;
+    run.status = 'done';
+    await deps.store.save(run);
+    bus.emit(runId, { phase: 'done', repos });
+    return run;
+  } catch (err: any) {
+    return fail(run, run.status, err, deps, bus);
+  }
+}
+
+/**
  * Replay step 1 — hydrate a stored workflow + a new question straight into a Run that
  * already sits at `searching`, SKIPPING propose + awaiting_edit. Saved so runPlan can
  * pick it up. Returns the created run (with its hydrated plan) so callers get the id for SSE.
@@ -241,6 +355,7 @@ export async function hydrateReplay(
     id,
     createdAt: deps.now().toISOString(),
     status: 'searching',
+    mode: workflow.mode ?? 'report',
     question: input.question,
     models: input.models ?? workflow.modelConfig,
     plan: planFromWorkflow(workflow, input.question),
@@ -261,6 +376,9 @@ export async function replayWorkflow(
   bus: EventBus
 ): Promise<Run> {
   const run = await hydrateReplay(workflow, input, deps);
+  if ((workflow.mode ?? 'report') === 'github') {
+    return runGithubSearch(run.id, run.plan, deps, bus);
+  }
   return runPlan(run.id, run.plan, deps, bus, { buildSynthPrompt: makeWorkflowSynthPrompt(workflow) });
 }
 
