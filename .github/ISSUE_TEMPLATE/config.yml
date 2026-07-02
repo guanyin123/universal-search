@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/guanyin123/universal-search/discussions
+    about: Ask questions and share ideas here (enable Discussions in repo settings).
+  - name: Security vulnerability
+    url: https://github.com/guanyin123/universal-search/security/advisories/new
+    about: Report a security issue privately — please do not open a public issue.

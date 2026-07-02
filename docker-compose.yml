@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    image: universal-search
+    container_name: universal-search
+    ports:
+      - "3000:3000"
+    # TAVILY_API_KEY is the only required variable. Everything else (LLM provider,
+    # save directory) is configured in-app via the first-run onboarding wizard.
+    env_file:
+      - .env
+    volumes:
+      # Persist app state (settings DB + encryption key, and run artifacts).
+      - ./.data:/app/.data
+      - ./.runs:/app/.runs
+      # Optional — enable "deposit to vault": mount your Obsidian vault, then set the
+      # save directory to /vault in-app (Settings). The vault must be a git repo, and
+      # the container needs a git identity (e.g. run `git config --global user.email ...`
+      # inside it, or bind-mount a ~/.gitconfig) for auto-commit to succeed.
+      # - /absolute/path/to/your/vault:/vault
+    restart: unless-stopped

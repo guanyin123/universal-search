@@ -2,7 +2,31 @@
 	"name": "universal-search",
 	"private": true,
 	"version": "0.0.1",
+	"description": "Local research tool — ask a question, edit an AI-proposed multi-source search plan, synthesize a report, and deposit it into your Obsidian vault.",
 	"type": "module",
+	"license": "Apache-2.0",
+	"author": "guanyin",
+	"homepage": "https://github.com/guanyin123/universal-search#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/guanyin123/universal-search.git"
+	},
+	"bugs": {
+		"url": "https://github.com/guanyin123/universal-search/issues"
+	},
+	"keywords": [
+		"research",
+		"search",
+		"obsidian",
+		"knowledge-management",
+		"sveltekit",
+		"ai",
+		"llm",
+		"tavily"
+	],
+	"engines": {
+		"node": ">=22.5.0"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
