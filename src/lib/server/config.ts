@@ -1,5 +1,10 @@
 export interface AppConfig {
-  vaultRoot: string;
+  /**
+   * Optional save-directory seed. The public branch configures the save dir in-app
+   * (settings store); this env var is only a back-compat fallback for the author's
+   * own branch. Use `getSaveDir()` (settings/index.ts) for the resolved value.
+   */
+  vaultRoot?: string;
   /**
    * Raw env-derived LLM config. All fields are OPTIONAL: AI-model config now lives in
    * the in-app settings store (channels). These env vars are only a first-run seed /
@@ -16,6 +21,10 @@ export interface AppConfig {
   tavily: { apiKey: string };
   exa: { apiKey?: string };
   community: { enabled: boolean };
+  /** Reddit app-only OAuth (optional). When both are set, subreddit scoring +
+   *  search route through oauth.reddit.com (bypasses the keyless 403 on
+   *  data-center IPs); otherwise the keyless www.reddit.com path is used. */
+  reddit: { clientId?: string; clientSecret?: string };
   unsplash: { accessKey?: string };
   jina: { apiKey?: string };
   /** GitHub tool-search mode. token is optional — anonymous works (lower rate limit). */
@@ -44,7 +53,9 @@ function required(env: Env, key: string): string {
 
 export function loadConfig(env: Env = process.env): AppConfig {
   return {
-    vaultRoot: required(env, 'VAULT_ROOT'),
+    // Optional: the save directory is configured in-app (settings store). Kept only
+    // as a back-compat fallback — see getSaveDir() in settings/index.ts.
+    vaultRoot: env.VAULT_ROOT?.trim() || undefined,
     llm: {
       // Optional: channels (the in-app settings store) are the source of truth.
       // These are kept only as a first-run seed / fallback.
@@ -60,6 +71,10 @@ export function loadConfig(env: Env = process.env): AppConfig {
     tavily: { apiKey: required(env, 'TAVILY_API_KEY') },
     exa: { apiKey: env.EXA_API_KEY?.trim() || undefined },
     community: { enabled: env.COMMUNITY_ENABLED?.trim() === 'true' },
+    reddit: {
+      clientId: env.REDDIT_CLIENT_ID?.trim() || undefined,
+      clientSecret: env.REDDIT_CLIENT_SECRET?.trim() || undefined
+    },
     unsplash: { accessKey: env.UNSPLASH_ACCESS_KEY?.trim() || undefined },
     jina: { apiKey: env.JINA_API_KEY?.trim() || undefined },
     github: { token: env.GITHUB_TOKEN?.trim() || undefined }

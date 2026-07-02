@@ -6,6 +6,7 @@ import {
   hydrateQuery,
   planFromWorkflow,
   makeWorkflowSynthPrompt,
+  workflowQuestion,
   QUESTION_PLACEHOLDER
 } from './build';
 import type { Run, Evidence } from '../runs/types';
@@ -131,6 +132,23 @@ describe('planFromWorkflow', () => {
     // placeholder query bound to the new question; keyword query verbatim
     expect(web.sources[0].query).toBe('What makes RAG reliable? overview');
     expect(web.sources[1].query).toBe('retrieval augmented generation benchmarks');
+  });
+});
+
+describe('workflowQuestion', () => {
+  it('returns the most recent run history question', () => {
+    const doc = buildWorkflowDoc(sampleRun());
+    // seeded runHistory has the originating question
+    expect(workflowQuestion(doc)).toBe('How does RAG improve LLM accuracy?');
+    // a later replay entry wins over earlier ones
+    doc.runHistory.push({ id: 'run-2', date: '2026-06-30', question: 'newer question' });
+    expect(workflowQuestion(doc)).toBe('newer question');
+  });
+
+  it('falls back to the questionPattern when run history is empty', () => {
+    const doc = buildWorkflowDoc(sampleRun());
+    doc.runHistory = [];
+    expect(workflowQuestion(doc)).toBe(doc.questionPattern);
   });
 });
 

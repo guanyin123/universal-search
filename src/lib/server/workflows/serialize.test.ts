@@ -53,6 +53,52 @@ describe('serialize/parse round-trip', () => {
     expect(round?.synthesisPrompt).toBe(doc.synthesisPrompt);
   });
 
+  it('round-trips community sources with named targets + scoring metadata', () => {
+    const doc = sampleDoc({
+      dimensions: [{ key: 'community', label: '社区与网站' }],
+      sources: [
+        {
+          dimension: 'community',
+          api: 'community',
+          query: 'rag eval',
+          target: { kind: 'subreddit', value: 'MachineLearning' },
+          label: 'r/MachineLearning',
+          scoreLabel: '2.9M 订阅',
+          score: 96
+        },
+        {
+          dimension: 'community',
+          api: 'community',
+          query: 'rag eval',
+          target: { kind: 'domain', value: 'stackoverflow.com' },
+          label: 'stackoverflow.com',
+          scoreLabel: '排名 #489',
+          score: 56
+        },
+        {
+          dimension: 'community',
+          api: 'community',
+          query: 'rag eval',
+          target: { kind: 'hn', value: 'hackernews' },
+          label: 'Hacker News',
+          scoreLabel: '头部技术社区',
+          score: 92
+        },
+        {
+          dimension: 'community',
+          api: 'community',
+          query: 'rag eval',
+          target: { kind: 'web', value: 'open-web' },
+          label: '开放网络搜索',
+          scoreLabel: '宽泛 · 低信任',
+          score: 0
+        }
+      ]
+    });
+    const round = parseWorkflowDoc(serializeWorkflowDoc(doc));
+    expect(round).toEqual(doc);
+  });
+
   it('round-trips a github-mode workflow', () => {
     const doc = sampleDoc({
       mode: 'github',

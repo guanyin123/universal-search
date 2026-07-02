@@ -1,9 +1,10 @@
 import type { MachineDeps } from './deps';
 import type { EventBus } from '../events';
-import type { Run, RunPlan, Evidence, PlanSource, PlanDimension, DimensionKey, RunMode } from './types';
+import type { Run, RunPlan, Evidence, PlanSource, PlanDimension, DimensionKey, RunMode, RunStatus } from './types';
 import type { SourceResult } from '../search/types';
 import { newRunId, slugify } from '../ids';
 import { buildProposePrompt, buildGithubProposePrompt, parseProposedQueries } from '../pipeline/propose';
+import { buildCommunityDimension, makeRealScorers } from '../pipeline/community-targets';
 import { buildRankPrompt, parseRankJudgments, rankRepos, type RepoJudgment } from '../pipeline/github-rank';
 import { buildCompressPrompt } from '../pipeline/compress';
 import { buildSynthesisPrompt } from '../pipeline/template';
@@ -24,13 +25,16 @@ const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const DIMENSION_LABELS: Record<DimensionKey, string> = {
   web: 'Web',
   peoples_writing: '他人写作',
-  community: '社区',
+  community: '搜索来源',
   images: '图片',
   github: 'GitHub'
 };
 // Proposal order for REPORT mode; only dimensions with a configured runner are used.
-// NOTE: 'github' is intentionally absent — it's a separate mode, never a report dimension.
-const DIMENSION_ORDER: DimensionKey[] = ['web', 'peoples_writing', 'community', 'images'];
+// 'community' is the unified "搜索来源" guardrail (subreddits + sites + HN + an
+// opt-in open-web card). 'web'/'peoples_writing' are folded INTO it (as broad cards),
+// so they're no longer standalone report dimensions — their runners stay registered
+// only for replaying legacy workflows. 'github' is a separate mode.
+const DIMENSION_ORDER: DimensionKey[] = ['community', 'images'];
 
 type ProposeInput = { question: string; models: { fanout: string; synth: string } };
 
@@ -42,6 +46,30 @@ async function proposeReportDimensions(input: ProposeInput, deps: MachineDeps): 
   for (const key of available) {
     const runner = deps.runners[key]!;
     try {
+      // The community dimension is a ranked, named target picker (subreddits +
+      // websites + HN), scored by real metrics — not free-text query strings.
+      if (key === 'community') {
+        try {
+          dimensions.push(
+            await buildCommunityDimension(
+              input.question,
+              deps.llm,
+              input.models.fanout,
+              DIMENSION_LABELS.community,
+              makeRealScorers(deps.redditFetch),
+              { web: !!deps.runners.web, writing: !!deps.runners.peoples_writing },
+              deps.sourceRegion ?? 'mixed'
+            )
+          );
+          continue;
+        } catch (err) {
+          console.warn(
+            '[propose] community target picker failed; falling back to query proposal:',
+            err instanceof Error ? err.message : err
+          );
+          // fall through to the generic free-text query proposal below
+        }
+      }
       const raw = await deps.llm.complete({
         role: 'fanout',
         model: input.models.fanout,
@@ -149,7 +177,7 @@ export async function runPlan(
           continue;
         }
         try {
-          const results = await runner.run(src.query);
+          const results = await runner.run(src.query, src.target);
           for (const r of results) {
             // Dedup by URL BEFORE the expensive extract+compress — multiple queries
             // may surface the same page; never pay Jina/LLM for it twice.
@@ -341,20 +369,23 @@ export async function runGithubSearch(
 }
 
 /**
- * Replay step 1 — hydrate a stored workflow + a new question straight into a Run that
- * already sits at `searching`, SKIPPING propose + awaiting_edit. Saved so runPlan can
- * pick it up. Returns the created run (with its hydrated plan) so callers get the id for SSE.
+ * Hydrate a stored workflow + a new question straight into a Run with its plan
+ * pre-filled from the workflow, SKIPPING propose. Default lands at `searching` (for
+ * end-to-end replay); pass `{ status: 'awaiting_edit' }` to instead park the run in the
+ * editor so the user reviews the pre-filled plan and clicks 开始搜索. Returns the created
+ * run (with its hydrated plan) so callers get the id for SSE.
  */
 export async function hydrateReplay(
   workflow: WorkflowDoc,
   input: { question: string; models?: { fanout: string; synth: string } },
-  deps: MachineDeps
+  deps: MachineDeps,
+  opts: { status?: RunStatus } = {}
 ): Promise<Run> {
   const id = newRunId();
   const run: Run = {
     id,
     createdAt: deps.now().toISOString(),
-    status: 'searching',
+    status: opts.status ?? 'searching',
     mode: workflow.mode ?? 'report',
     question: input.question,
     models: input.models ?? workflow.modelConfig,

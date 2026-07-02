@@ -20,11 +20,31 @@ export type DimensionKey = 'web' | 'peoples_writing' | 'community' | 'images' | 
 /** Search APIs backing a source. ('community' fans out to Reddit + HN.) */
 export type SourceApi = 'tavily' | 'exa' | 'community' | 'unsplash' | 'github';
 
+/** A named search target for the unified "搜索来源" (source guardrail) picker.
+ *  Vetted targets: subreddit / hn / domain. Broad low-trust cards: web (open-web
+ *  Tavily) / writing (Exa) — off by default, the opt-in discovery escape hatch. */
+export type CommunityTargetKind = 'subreddit' | 'hn' | 'domain' | 'web' | 'writing';
+/** value: subreddit name (no `r/` prefix) | 'hackernews' | a bare domain |
+ *  'open-web' | 'exa' (the last two are broad, value is just an identifier). */
+export interface CommunityTarget {
+  kind: CommunityTargetKind;
+  value: string;
+}
+
 export interface PlanSource {
   id: string;
   api: SourceApi;
   query: string;
   enabled: boolean;
+  /** Community dimension only: the named target this source searches. Other
+   *  dimensions leave it undefined (back-compat: optional everywhere). */
+  target?: CommunityTarget;
+  /** Display name for the target, e.g. "r/MachineLearning" / "stackoverflow.com". */
+  label?: string;
+  /** Human-readable score detail, e.g. "2.9M 订阅" / "排名 #38". */
+  scoreLabel?: string;
+  /** Normalized priority 0-100 — orders the picker + default-selects the top 3. */
+  score?: number;
 }
 
 export interface PlanDimension {

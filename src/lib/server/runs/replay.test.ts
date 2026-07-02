@@ -83,6 +83,16 @@ describe('hydrateReplay', () => {
     const b = await hydrateReplay(workflow(), { question: 'Q', models: { fanout: 'o', synth: 'p' } }, deps);
     expect(b.models).toEqual({ fanout: 'o', synth: 'p' });
   });
+
+  it('parks at awaiting_edit (no auto-search) when asked, with the plan pre-filled', async () => {
+    const deps = fakeDeps();
+    const run = await hydrateReplay(workflow(), { question: 'NEWQ' }, deps, { status: 'awaiting_edit' });
+    expect(run.status).toBe('awaiting_edit');
+    expect(run.plan.dimensions[0].sources.map((s) => s.query)).toEqual(['NEWQ overview', 'rag benchmarks']);
+    expect(deps.llm.complete).not.toHaveBeenCalled();
+    // persisted so the editor's 开始搜索 (→ /plan) can pick it up
+    expect((await deps.store.get(run.id))?.status).toBe('awaiting_edit');
+  });
 });
 
 describe('replayWorkflow', () => {

@@ -76,6 +76,26 @@ describe('settings store: CRUD', () => {
   });
 });
 
+describe('settings store: generic app settings', () => {
+  it('returns null for an unset key, then round-trips and overwrites a value', () => {
+    const s = freshStore();
+    expect(s.getSetting('save_dir')).toBeNull();
+    s.setSetting('save_dir', '/tmp/research');
+    expect(s.getSetting('save_dir')).toBe('/tmp/research');
+    s.setSetting('save_dir', '/tmp/other');
+    expect(s.getSetting('save_dir')).toBe('/tmp/other'); // upsert, not duplicate
+  });
+
+  it('round-trips the source_region preference', () => {
+    const s = freshStore();
+    expect(s.getSetting('source_region')).toBeNull(); // unset → caller defaults to 'mixed'
+    s.setSetting('source_region', 'domestic');
+    expect(s.getSetting('source_region')).toBe('domestic');
+    s.setSetting('source_region', 'foreign');
+    expect(s.getSetting('source_region')).toBe('foreign');
+  });
+});
+
 describe('settings store: seedFromEnv', () => {
   it('seeds once when empty and is a no-op afterwards', () => {
     const s = freshStore();

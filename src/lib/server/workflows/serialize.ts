@@ -1,4 +1,4 @@
-import type { DimensionKey, SourceApi, RunMode } from '../runs/types';
+import type { DimensionKey, SourceApi, RunMode, CommunityTargetKind } from '../runs/types';
 import type { WorkflowDoc, WorkflowDimension, WorkflowSource, WorkflowRunRef } from './types';
 
 /**
@@ -65,7 +65,20 @@ export function serializeWorkflowDoc(doc: WorkflowDoc): string {
   }
   fm.push('sources:');
   for (const s of doc.sources) {
-    fm.push(emitItem([['dimension', s.dimension], ['api', s.api], ['query', s.query]]));
+    const fields: Array<[string, string]> = [
+      ['dimension', s.dimension],
+      ['api', s.api],
+      ['query', s.query]
+    ];
+    // Flatten the community target into scalar fields (the serializer only handles
+    // flat key:value items, no nested maps).
+    if (s.target) {
+      fields.push(['targetKind', s.target.kind], ['targetValue', s.target.value]);
+      if (s.label) fields.push(['label', s.label]);
+      if (s.scoreLabel) fields.push(['scoreLabel', s.scoreLabel]);
+      if (typeof s.score === 'number') fields.push(['score', String(s.score)]);
+    }
+    fm.push(emitItem(fields));
   }
   fm.push('run_history:');
   for (const r of doc.runHistory) {
@@ -199,11 +212,20 @@ export function parseWorkflowDoc(md: string): WorkflowDoc | null {
     key: d.key as DimensionKey,
     label: d.label ?? d.key
   }));
-  const sources: WorkflowSource[] = asList(fm.sources).map((s) => ({
-    dimension: s.dimension as DimensionKey,
-    api: s.api as SourceApi,
-    query: s.query ?? ''
-  }));
+  const sources: WorkflowSource[] = asList(fm.sources).map((s) => {
+    const src: WorkflowSource = {
+      dimension: s.dimension as DimensionKey,
+      api: s.api as SourceApi,
+      query: s.query ?? ''
+    };
+    if (s.targetKind && s.targetValue) {
+      src.target = { kind: s.targetKind as CommunityTargetKind, value: s.targetValue };
+      if (s.label) src.label = s.label;
+      if (s.scoreLabel) src.scoreLabel = s.scoreLabel;
+      if (s.score) src.score = Number(s.score);
+    }
+    return src;
+  });
   const runHistory: WorkflowRunRef[] = asList(fm.run_history).map((r) => ({
     id: r.id ?? '',
     date: r.date ?? '',

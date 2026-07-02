@@ -1,4 +1,4 @@
-import type { SourceApi } from '../runs/types';
+import type { SourceApi, CommunityTarget } from '../runs/types';
 
 export interface SourceResult {
   url: string;
@@ -22,5 +22,7 @@ export interface SourceRunner {
   /** Narrowed to the SourceApi union so a runner returning an unknown api fails
    *  at compile time instead of being force-cast into a PlanSource (was: string). */
   api: SourceApi;
-  run(query: string): Promise<SourceResult[]>;
+  /** `target` is supplied only by the community dimension (subreddit / HN / domain);
+   *  all other runners ignore it. Optional → back-compat with existing callers. */
+  run(query: string, target?: CommunityTarget): Promise<SourceResult[]>;
 }

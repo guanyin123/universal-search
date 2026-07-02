@@ -2,25 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { simpleGit } from 'simple-git';
 import { makeRunStore } from './store';
 import { makeEventBus } from '../events';
 import { depositRun } from './deposit';
 import type { MachineDeps } from './deps';
 import type { Run } from './types';
 
-let vault: string, runsDir: string;
+let saveRoot: string, runsDir: string;
 beforeEach(async () => {
-  vault = await mkdtemp(join(tmpdir(), 'vault-'));
+  // Public branch: a plain directory — NOT a git repo.
+  saveRoot = await mkdtemp(join(tmpdir(), 'save-'));
   runsDir = await mkdtemp(join(tmpdir(), 'runs-'));
-  const git = simpleGit(vault);
-  await git.init();
-  await git.addConfig('user.email', 't@t.co');
-  await git.addConfig('user.name', 'T');
-  await simpleGit(vault).raw(['commit', '--allow-empty', '-m', 'init']);
 });
 afterEach(async () => {
-  await rm(vault, { recursive: true, force: true });
+  await rm(saveRoot, { recursive: true, force: true });
   await rm(runsDir, { recursive: true, force: true });
 });
 
@@ -39,35 +34,42 @@ function depositableRun(): Run {
   };
 }
 
-function deps(): MachineDeps {
+function deps(over: Partial<MachineDeps> = {}): MachineDeps {
   return {
-    vaultRoot: vault, llm: {} as any, runners: {} as any, extract: vi.fn(),
+    vaultRoot: saveRoot, llm: {} as any, runners: {} as any, extract: vi.fn(),
     readLibrary: vi.fn(async () => ({ vocab: [], notes: [] })),
-    store: makeRunStore(runsDir), now: () => new Date('2026-06-17T00:00:00Z')
+    store: makeRunStore(runsDir), now: () => new Date('2026-06-17T00:00:00Z'),
+    ...over
   };
 }
 
 describe('depositRun', () => {
-  it('writes files, commits, and marks the run done', async () => {
+  it('writes files into a plain (non-git) directory and marks the run done', async () => {
     const d = deps();
     await d.store.save(depositableRun());
     const bus = makeEventBus();
     const run = await depositRun('run-x', d, bus);
     expect(run.status).toBe('done');
-    const written = await readFile(join(vault, 'wiki/synthesis/q.md'), 'utf8');
+    const written = await readFile(join(saveRoot, 'wiki/synthesis/q.md'), 'utf8');
     expect(written).toContain('# Q');
-    const log = await simpleGit(vault).log();
-    expect(log.latest?.message).toContain('research: Q');
+    const raw = await readFile(join(saveRoot, 'raw/research/2026-06-17-q/1-a.md'), 'utf8');
+    expect(raw).toContain('# A');
   });
 
-  it('hard-aborts when the vault is dirty at deposit time', async () => {
+  it('emits the report path on done', async () => {
     const d = deps();
     await d.store.save(depositableRun());
-    const { writeFile } = await import('node:fs/promises');
-    await writeFile(join(vault, 'dirty.md'), 'x');
     const bus = makeEventBus();
-    const run = await depositRun('run-x', d, bus);
-    expect(run.status).toBe('error');
-    expect(run.error?.message).toMatch(/dirty/i);
+    const events: any[] = [];
+    bus.subscribe('run-x', (e) => events.push(e));
+    await depositRun('run-x', d, bus);
+    expect(events.at(-1)).toMatchObject({ phase: 'done', reportPath: 'wiki/synthesis/q.md' });
+  });
+
+  it('rejects when no save directory is configured', async () => {
+    const d = deps({ vaultRoot: '' });
+    await d.store.save(depositableRun());
+    const bus = makeEventBus();
+    await expect(depositRun('run-x', d, bus)).rejects.toThrow(/保存目录/);
   });
 });

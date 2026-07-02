@@ -6,6 +6,7 @@
 		reportView = $bindable(),
 		rawCount,
 		willWritePath,
+		saveDir,
 		reportPath,
 		depositing,
 		savingWorkflow,
@@ -19,6 +20,7 @@
 		reportView: 'preview' | 'source';
 		rawCount: number;
 		willWritePath: string;
+		saveDir: string;
 		reportPath: string;
 		depositing: boolean;
 		savingWorkflow: boolean;
@@ -41,7 +43,7 @@
 		<div class="meta">
 			<span class="pill">type: synthesis</span>
 			<span class="pill">{rawCount} 条来源</span>
-			<span style="margin-left:auto">将写入 second brain</span>
+			<span style="margin-left:auto">将保存到目录</span>
 		</div>
 		{#if reportView === 'preview'}
 			<div class="doc">{@html renderedReport}</div>
@@ -53,13 +55,15 @@
 	{#if phase === 'awaiting_deposit'}
 		<div class="deposit-bar">
 			<div>
-				<div class="where">将写入 <code>{willWritePath}</code></div>
-				<div class="note-line warn" style="margin-top:4px">
-					<i class="ph ph-info"></i> 沉淀前请确保 vault 工作区干净，否则会安全中止
-				</div>
+				<div class="where">将写入 <code>{saveDir ? `${saveDir}/${willWritePath}` : willWritePath}</code></div>
+				{#if !saveDir}
+					<div class="note-line warn" style="margin-top:4px">
+						<i class="ph ph-warning-circle"></i> 尚未配置保存目录 — 请先在「设置」中指定一个目录
+					</div>
+				{/if}
 			</div>
-			<button class="btn btn-primary" onclick={onDeposit} disabled={depositing}>
-				{#if depositing}<span class="spin"></span> 沉淀中…{:else}<i class="ph ph-tray-arrow-down"></i> 确认沉淀进第二大脑{/if}
+			<button class="btn btn-primary" onclick={onDeposit} disabled={depositing || !saveDir}>
+				{#if depositing}<span class="spin"></span> 保存中…{:else}<i class="ph ph-tray-arrow-down"></i> 确认保存到目录{/if}
 			</button>
 		</div>
 	{/if}
@@ -76,6 +80,6 @@
 <!-- 完成 -->
 {#if phase === 'done'}
 	<div class="done-banner">
-		<i class="ph ph-check-circle"></i> 已沉淀：<code>{reportPath}</code>
+		<i class="ph ph-check-circle"></i> 已保存：<code>{reportPath}</code>
 	</div>
 {/if}

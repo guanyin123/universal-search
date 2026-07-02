@@ -5,11 +5,17 @@ import { join } from 'node:path';
 import { makeRunStore } from './store';
 import { makeEventBus } from '../events';
 import { startRun, runPlan, runGithubSearch } from './machine';
+import { newRunId } from '../ids';
 import type { MachineDeps } from './deps';
+import type { PlanDimension, RunPlan } from './types';
 
 let dir: string;
-beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'm-')); });
-afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'm-'));
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
 
 function fakeDeps(over: Partial<MachineDeps> = {}): MachineDeps {
   return {
@@ -35,41 +41,82 @@ function fakeDeps(over: Partial<MachineDeps> = {}): MachineDeps {
   };
 }
 
-describe('startRun', () => {
-  it('proposes web queries and pauses at awaiting_edit', async () => {
-    const bus = makeEventBus();
-    const deps = fakeDeps();
-    const run = await startRun({ question: 'How does RAG work?', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    expect(run.status).toBe('awaiting_edit');
-    expect(run.plan.dimensions[0].sources.map((s) => s.query)).toEqual(['rag basics', 'rag pipeline']);
-    const saved = await deps.store.get(run.id);
-    expect(saved?.status).toBe('awaiting_edit');
-  });
+// Seed a run straight into the store at awaiting_edit with a hand-built plan, so the
+// runPlan tests exercise the (dimension-agnostic) run loop without depending on the
+// propose path — which now proposes only the unified 'community' guardrail dimension.
+async function seedRun(deps: MachineDeps, plan: RunPlan): Promise<string> {
+  const id = newRunId();
+  await deps.store.save({
+    id,
+    createdAt: '2026-06-17T00:00:00.000Z',
+    status: 'awaiting_edit',
+    mode: 'report',
+    question: 'Q',
+    models: { fanout: 'f', synth: 's' },
+    plan,
+    evidence: []
+  } as any);
+  return id;
+}
+const dimOf = (key: any, label: string, sources: any[]): PlanDimension => ({ key, label, enabled: true, sources });
+const src = (id: string, over: any = {}) => ({ id, api: 'tavily', query: 'q', enabled: true, ...over });
 
-  it('skips a dimension whose proposing fails but keeps the others (an Exa hiccup never drops Web)', async () => {
+describe('startRun (report)', () => {
+  it('proposes the 搜索来源 guardrail dimension and pauses at awaiting_edit', async () => {
     const bus = makeEventBus();
     const deps = fakeDeps({
       runners: {
-        web: { dimension: 'web', api: 'tavily', run: vi.fn(async () => [{ url: 'https://a.com', title: 'A', snippet: 's' }]) },
-        peoples_writing: { dimension: 'peoples_writing', api: 'exa', run: vi.fn(async () => []) }
+        web: { dimension: 'web', api: 'tavily', run: vi.fn(async () => []) },
+        community: { dimension: 'community', api: 'community', run: vi.fn(async () => []) }
+      } as any,
+      // Return the guardrail proposal object for the community-targets prompt (domain-only →
+      // scoring stays offline: HN + Tranco are synchronous, no subreddit network call).
+      llm: {
+        complete: vi.fn(async ({ prompt }: any) =>
+          /COMMUNITIES and WEBSITES/.test(prompt)
+            ? '{"keywords":"rag","targets":[{"kind":"domain","value":"stackoverflow.com"}]}'
+            : '- compressed'
+        ),
+        stream: vi.fn()
       } as any
     });
-    // The peoples_writing prompt is the only one mentioning long-form/essays/blog — make it throw.
-    (deps.llm.complete as any).mockImplementation(async ({ prompt }: any) => {
-      if (/long-form|essays|blog|personal/i.test(prompt)) throw new Error('exa planning down');
-      return '["rag basics","rag pipeline"]';
-    });
-    const run = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    const run = await startRun({ question: 'How does RAG work?', models: { fanout: 'f', synth: 's' } }, deps, bus);
     expect(run.status).toBe('awaiting_edit');
-    expect(run.plan.dimensions.map((d) => d.key)).toEqual(['web']);
+    expect(run.plan.dimensions[0].key).toBe('community');
+    const kinds = run.plan.dimensions[0].sources.map((s) => s.target?.kind);
+    expect(kinds).toContain('domain');
+    expect(kinds).toContain('web'); // open-web escape-hatch card appended (web runner present)
+    const webCard = run.plan.dimensions[0].sources.find((s) => s.target?.kind === 'web');
+    expect(webCard?.enabled).toBe(false); // broad card OFF by default
   });
 
-  it('aborts at the proposing stage when every dimension fails to yield queries', async () => {
+  it('falls back to a free-text query proposal when the guardrail proposal is unusable', async () => {
     const bus = makeEventBus();
-    const deps = fakeDeps();
-    (deps.llm.complete as any).mockImplementation(async ({ role }: any) => {
-      if (role === 'fanout') throw new Error('planning down');
-      return '- compressed';
+    const deps = fakeDeps({
+      runners: {
+        web: { dimension: 'web', api: 'tavily', run: vi.fn(async () => []) },
+        community: { dimension: 'community', api: 'community', run: vi.fn(async () => []) }
+      } as any
+    });
+    // Default llm returns an array (not the {keywords,targets} object) → parse fails →
+    // machine falls back to the generic free-text query proposal for community.
+    const run = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    expect(run.status).toBe('awaiting_edit');
+    expect(run.plan.dimensions[0].key).toBe('community');
+    expect(run.plan.dimensions[0].sources.map((s) => s.query)).toEqual(['rag basics', 'rag pipeline']);
+  });
+
+  it('aborts at the proposing stage when no dimension yields anything', async () => {
+    const bus = makeEventBus();
+    const deps = fakeDeps({
+      runners: { community: { dimension: 'community', api: 'community', run: vi.fn(async () => []) } } as any,
+      llm: {
+        complete: vi.fn(async ({ role }: any) => {
+          if (role === 'fanout') throw new Error('planning down');
+          return '- compressed';
+        }),
+        stream: vi.fn()
+      } as any
     });
     const run = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
     expect(run.status).toBe('error');
@@ -82,9 +129,10 @@ describe('runPlan', () => {
   it('searches, compresses, synthesizes, tags, and pauses at awaiting_deposit', async () => {
     const bus = makeEventBus();
     const deps = fakeDeps();
+    const plan: RunPlan = { dimensions: [dimOf('web', 'Web', [src('web-1'), src('web-2')])] };
+    const id = await seedRun(deps, plan);
     const phases: string[] = [];
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    bus.subscribe(run0.id, (e) => phases.push(e.phase));
+    bus.subscribe(id, (e) => phases.push(e.phase));
 
     (deps.llm.complete as any).mockImplementation(async ({ role, prompt }: any) => {
       if (/tags/i.test(prompt)) return '["RAG","AI"]';
@@ -92,9 +140,9 @@ describe('runPlan', () => {
       return '- compressed';
     });
 
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.status).toBe('awaiting_deposit');
-    expect(run.evidence).toHaveLength(1);
+    expect(run.evidence).toHaveLength(1); // both sources return a.com → dedup
     expect(run.report?.markdown).toContain('核心发现');
     expect(run.report?.frontmatter.tags).toEqual(['RAG', 'AI']);
     expect(run.depositPlan?.files.some((f) => f.kind === 'synthesis')).toBe(true);
@@ -105,9 +153,9 @@ describe('runPlan', () => {
   it('skips disabled sources and survives an extractor failure', async () => {
     const bus = makeEventBus();
     const deps = fakeDeps({ extract: vi.fn(async () => '') });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    run0.plan.dimensions[0].sources[1].enabled = false;
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const plan: RunPlan = { dimensions: [dimOf('web', 'Web', [src('web-1'), src('web-2', { enabled: false })])] };
+    const id = await seedRun(deps, plan);
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.status).toBe('awaiting_deposit');
   });
 
@@ -124,9 +172,9 @@ describe('runPlan', () => {
         }
       } as any
     });
-    // startRun proposes 2 sources; both return the SAME url → only one should be extracted
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const plan: RunPlan = { dimensions: [dimOf('web', 'Web', [src('web-1'), src('web-2')])] };
+    const id = await seedRun(deps, plan);
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.evidence).toHaveLength(1);
     expect(extract).toHaveBeenCalledTimes(1);
   });
@@ -144,8 +192,9 @@ describe('runPlan', () => {
         }
       } as any
     });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const plan: RunPlan = { dimensions: [dimOf('web', 'Web', [src('web-1')])] };
+    const id = await seedRun(deps, plan);
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.status).toBe('error');
     expect(run.evidence).toHaveLength(0);
   });
@@ -160,9 +209,13 @@ describe('runPlan', () => {
         peoples_writing: { dimension: 'peoples_writing', api: 'exa', run: exaRun }
       } as any
     });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    // startRun proposes for every configured dimension, in order
-    expect(run0.plan.dimensions.map((d) => d.key)).toEqual(['web', 'peoples_writing']);
+    const plan: RunPlan = {
+      dimensions: [
+        dimOf('web', 'Web', [src('web-1')]),
+        dimOf('peoples_writing', '他人写作', [src('pw-1', { api: 'exa' })])
+      ]
+    };
+    const id = await seedRun(deps, plan);
 
     (deps.llm.complete as any).mockImplementation(async ({ role, prompt }: any) => {
       if (/tags/i.test(prompt)) return '["T"]';
@@ -170,7 +223,7 @@ describe('runPlan', () => {
       return '- compressed';
     });
 
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const run = await runPlan(id, plan, deps, bus);
     expect(webRun).toHaveBeenCalled();
     expect(exaRun).toHaveBeenCalled();
     expect(run.evidence).toHaveLength(2);
@@ -189,15 +242,21 @@ describe('runPlan', () => {
         peoples_writing: { dimension: 'peoples_writing', api: 'exa', run: exaRun }
       } as any
     });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const plan: RunPlan = {
+      dimensions: [
+        dimOf('web', 'Web', [src('web-1')]),
+        dimOf('peoples_writing', '他人写作', [src('pw-1', { api: 'exa' })])
+      ]
+    };
+    const id = await seedRun(deps, plan);
+    const run = await runPlan(id, plan, deps, bus);
     expect(exaRun).toHaveBeenCalled();
     expect(run.status).toBe('awaiting_deposit');
     expect(run.evidence).toHaveLength(1);
     expect(run.evidence.map((e) => e.dimension)).toEqual(['web']);
   });
 
-  it('dedups the same URL across dimensions before extracting (web + peoples_writing share a page)', async () => {
+  it('dedups the same URL across dimensions before extracting (two dims share a page)', async () => {
     const bus = makeEventBus();
     const extract = vi.fn(async () => '# page');
     const url = 'https://shared-essay.com';
@@ -208,8 +267,14 @@ describe('runPlan', () => {
         peoples_writing: { dimension: 'peoples_writing', api: 'exa', run: vi.fn(async () => [{ url, title: 'S', snippet: 's' }]) }
       } as any
     });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const plan: RunPlan = {
+      dimensions: [
+        dimOf('web', 'Web', [src('web-1')]),
+        dimOf('peoples_writing', '他人写作', [src('pw-1', { api: 'exa' })])
+      ]
+    };
+    const id = await seedRun(deps, plan);
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.evidence).toHaveLength(1);
     expect(extract).toHaveBeenCalledTimes(1);
   });
@@ -224,7 +289,8 @@ describe('runPlan', () => {
       ]
     };
     const deps = fakeDeps({ readLibrary: vi.fn(async () => library) });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
+    const plan: RunPlan = { dimensions: [dimOf('web', 'Web', [src('web-1')])] };
+    const id = await seedRun(deps, plan);
 
     let tagsPrompt = '';
     (deps.llm.complete as any).mockImplementation(async ({ role, prompt }: any) => {
@@ -236,11 +302,9 @@ describe('runPlan', () => {
       return '- compressed';
     });
 
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const run = await runPlan(id, plan, deps, bus);
     expect(deps.readLibrary).toHaveBeenCalled();
-    // the existing vocabulary was offered to the tag generator
     expect(tagsPrompt).toContain('RAG');
-    // related auto-linked to the tag-overlapping note only (not the unrelated one, not self)
     expect(run.report?.frontmatter.related).toEqual(['wiki/synthesis/rag-basics.md']);
   });
 
@@ -259,13 +323,12 @@ describe('runPlan', () => {
       extract,
       runners: { images: { dimension: 'images', api: 'unsplash', run: imgRun } } as any
     });
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    expect(run0.plan.dimensions.map((d) => d.key)).toEqual(['images']);
+    const plan: RunPlan = { dimensions: [dimOf('images', '图片', [src('images-1', { api: 'unsplash' })])] };
+    const id = await seedRun(deps, plan);
 
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    const run = await runPlan(id, plan, deps, bus);
     expect(imgRun).toHaveBeenCalled();
-    // images bypass the text pipeline entirely
-    expect(extract).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled(); // images bypass the text pipeline entirely
     expect(run.status).toBe('awaiting_deposit');
     expect(run.evidence).toHaveLength(1);
     expect(run.evidence[0].dimension).toBe('images');
@@ -276,18 +339,17 @@ describe('runPlan', () => {
   it('gracefully degrades an enabled dimension whose runner is missing (no crash)', async () => {
     const bus = makeEventBus();
     const deps = fakeDeps(); // only the web runner is configured
-    const run0 = await startRun({ question: 'Q', models: { fanout: 'f', synth: 's' } }, deps, bus);
-    // Simulate a resumed/hand-edited plan that enables peoples_writing with no runner available
-    // (e.g. EXA_API_KEY removed between propose and run).
-    run0.plan.dimensions.push({
-      key: 'peoples_writing',
-      label: '他人写作',
-      enabled: true,
-      sources: [{ id: 'peoples_writing-1', api: 'exa', query: 'essays', enabled: true }]
-    });
+    // A plan that enables peoples_writing with no runner available (e.g. EXA key removed).
+    const plan: RunPlan = {
+      dimensions: [
+        dimOf('web', 'Web', [src('web-1')]),
+        dimOf('peoples_writing', '他人写作', [src('peoples_writing-1', { api: 'exa', query: 'essays' })])
+      ]
+    };
+    const id = await seedRun(deps, plan);
     const events: any[] = [];
-    bus.subscribe(run0.id, (e) => events.push(e));
-    const run = await runPlan(run0.id, run0.plan, deps, bus);
+    bus.subscribe(id, (e) => events.push(e));
+    const run = await runPlan(id, plan, deps, bus);
     expect(run.status).toBe('awaiting_deposit');
     expect(run.evidence.every((e) => e.dimension === 'web')).toBe(true);
     expect(
@@ -304,7 +366,9 @@ describe('github mode', () => {
       } as any,
       llm: {
         complete: vi.fn(async ({ role }: any) =>
-          role === 'fanout' ? '["vector db"]' : '[{"name":"o/small","reputation":10,"reason":"loved"},{"name":"o/big","reputation":1,"reason":"stale"}]'
+          role === 'fanout'
+            ? '["vector db"]'
+            : '[{"name":"o/small","reputation":10,"reason":"loved"},{"name":"o/big","reputation":1,"reason":"stale"}]'
         ),
         stream: vi.fn()
       } as any,
@@ -336,10 +400,9 @@ describe('github mode', () => {
 
     expect(run.status).toBe('done');
     expect(run.repos).toHaveLength(2);
-    // reputation 10 lifts o/small above o/big's raw star count
-    expect(run.repos?.[0].fullName).toBe('o/small');
+    expect(run.repos?.[0].fullName).toBe('o/small'); // reputation lifts it above raw stars
     expect(run.repos?.[0].reason).toBe('loved');
-    expect(run.evidence).toHaveLength(0); // github tail never extracts/compresses
+    expect(run.evidence).toHaveLength(0);
     expect(phases).toContain('querying');
     expect(phases).toContain('done');
   });
@@ -370,7 +433,7 @@ describe('github mode', () => {
     const run0 = await startRun({ question: 'q', models: { fanout: 'f', synth: 's' } }, deps, bus, 'github');
     const run = await runGithubSearch(run0.id, run0.plan, deps, bus);
     expect(run.status).toBe('done');
-    expect(run.repos?.[0].fullName).toBe('o/big'); // most stars first
+    expect(run.repos?.[0].fullName).toBe('o/big');
     expect(run.repos?.every((r) => r.reputation === 5)).toBe(true);
   });
 });

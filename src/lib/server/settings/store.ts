@@ -29,6 +29,9 @@ export interface SettingsStore {
   remove(id: string): boolean;
   getActiveId(): string | null;
   setActive(id: string): boolean;
+  /** Generic app-setting get/set over the `app_settings` k/v table (null when unset). */
+  getSetting(key: string): string | null;
+  setSetting(key: string, value: string): void;
   /** The active channel with decrypted key — SERVER-ONLY. */
   getActiveChannel(): Channel | null;
   /** Seed a channel on first run. No-op once any channel exists, or when `seed` is null. */
@@ -126,6 +129,19 @@ export function makeSettingsStore(dir: string, env: NodeJS.ProcessEnv = process.
     db.prepare('DELETE FROM app_settings WHERE key = ?').run(ACTIVE_KEY);
   }
 
+  function getSetting(key: string): string | null {
+    const r = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined;
+    return r?.value ?? null;
+  }
+
+  function setSetting(key: string, value: string): void {
+    db.prepare(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).run(key, value);
+  }
+
   function create(input: ChannelInput): ChannelPublic {
     const id = newId();
     const createdAt = new Date().toISOString();
@@ -194,6 +210,8 @@ export function makeSettingsStore(dir: string, env: NodeJS.ProcessEnv = process.
     remove,
     getActiveId,
     setActive,
+    getSetting,
+    setSetting,
     getActiveChannel() {
       const id = getActiveId();
       return id ? get(id) : null;

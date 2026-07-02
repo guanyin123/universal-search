@@ -46,9 +46,23 @@ describe('loadConfig', () => {
     expect(loadConfig(base).github.token).toBeUndefined();
   });
 
+  it('parses Reddit OAuth creds when present and is undefined when absent (keyless)', () => {
+    const cfg = loadConfig({ ...base, REDDIT_CLIENT_ID: 'cid', REDDIT_CLIENT_SECRET: 'sec' });
+    expect(cfg.reddit.clientId).toBe('cid');
+    expect(cfg.reddit.clientSecret).toBe('sec');
+    expect(loadConfig(base).reddit.clientId).toBeUndefined();
+    expect(loadConfig(base).reddit.clientSecret).toBeUndefined();
+  });
+
   it('throws a clear error when a required var is missing', () => {
     const { TAVILY_API_KEY, ...missing } = base;
     expect(() => loadConfig(missing)).toThrow(/TAVILY_API_KEY/);
+  });
+
+  it('treats VAULT_ROOT as optional (save dir is configured in-app) — no throw when absent', () => {
+    const { VAULT_ROOT, ...missing } = base;
+    expect(loadConfig(missing).vaultRoot).toBeUndefined();
+    expect(loadConfig(base).vaultRoot).toBe('/tmp/vault');
   });
 
   it('treats LLM_* as optional (channels are the source of truth) — no throw when absent', () => {

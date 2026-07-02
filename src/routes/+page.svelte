@@ -7,8 +7,19 @@
 	import ReportResult from '$lib/ReportResult.svelte';
 	import QuickSearchMode from '$lib/QuickSearchMode.svelte';
 	import ChannelSettings from '$lib/ChannelSettings.svelte';
+	import OnboardingWizard from '$lib/OnboardingWizard.svelte';
 
-	type Source = { id: string; api: string; query: string; enabled: boolean };
+	type CommunityTarget = { kind: 'subreddit' | 'hn' | 'domain' | 'web' | 'writing'; value: string };
+	type Source = {
+		id: string;
+		api: string;
+		query: string;
+		enabled: boolean;
+		target?: CommunityTarget;
+		label?: string;
+		scoreLabel?: string;
+		score?: number;
+	};
 	type Plan = { dimensions: { key: string; label: string; enabled: boolean; sources: Source[] }[] };
 	type Models = {
 		models: string[];
@@ -51,7 +62,19 @@
 	let mode = $state('light');
 	let settingsOpen = $state(false);
 	let channelsOpen = $state(false);
+	let onboardingOpen = $state(false);
 	let reportView = $state<'preview' | 'source'>('preview');
+
+	// save directory (where reports/workflows are written — replaces the hard-coded vault)
+	let saveDir = $state('');
+	let saveDirInput = $state('');
+	let savingDir = $state(false);
+	let saveDirMsg = $state('');
+	let saveDirOk = $state<boolean | null>(null);
+
+	// information-source region (国内/国外/混合) — biases dimension proposal + community/site picking
+	let sourceRegion = $state<'domestic' | 'foreign' | 'mixed'>('mixed');
+	let regionMsg = $state('');
 
 	// search mode (report ↔ github tool search ↔ quick web search)
 	let searchMode = $state<SearchMode>('report');
@@ -67,6 +90,7 @@
 	let fanoutModel = $state('');
 	let synthModel = $state('');
 	let needsSetup = $state(false);
+	let modelsMsg = $state(''); // inline feedback when the model choice is persisted
 
 	// channels (AI provider settings — base_url/key/model, replaces .env)
 	let channels = $state<Channel[]>([]);
@@ -77,13 +101,62 @@
 	let workflows = $state<WorkflowItem[]>([]);
 	let savingWorkflow = $state(false);
 	let savedMsg = $state('');
+	let replayHint = $state('');
 
 	onMount(() => {
 		mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
 		loadModels();
 		loadChannels();
 		loadWorkflows();
+		loadSaveDir();
+		loadRegion();
+		// First-run: open the welcome wizard until the user has been through it once.
+		try {
+			if (!localStorage.getItem('us-onboarded')) onboardingOpen = true;
+		} catch {
+			/* private mode etc. */
+		}
 	});
+
+	async function loadSaveDir() {
+		try {
+			const r = await fetch('/api/settings');
+			if (!r.ok) return;
+			const d = await r.json();
+			saveDir = d.saveDir ?? '';
+			saveDirInput = saveDir;
+		} catch {
+			/* not fatal */
+		}
+	}
+
+	async function saveSaveDir() {
+		if (savingDir) return;
+		savingDir = true;
+		saveDirMsg = '';
+		saveDirOk = null;
+		try {
+			const r = await fetch('/api/settings', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ saveDir: saveDirInput })
+			});
+			const d = await r.json().catch(() => ({}));
+			saveDirOk = !!d.ok;
+			if (d.ok) {
+				saveDir = d.saveDir ?? saveDirInput;
+				saveDirInput = saveDir;
+				saveDirMsg = '已保存';
+			} else {
+				saveDirMsg = d.error ?? '保存失败';
+			}
+		} catch {
+			saveDirOk = false;
+			saveDirMsg = '无法连接本地服务';
+		} finally {
+			savingDir = false;
+		}
+	}
 
 	async function loadWorkflows() {
 		try {
@@ -122,6 +195,76 @@
 	}
 
 	const activeChannelName = $derived(channels.find((c) => c.id === activeChannelId)?.name ?? '');
+
+	// Persist the fanout/synth model choice onto the active channel so it survives a
+	// refresh (the channel is the source of truth /api/models reads back as defaults).
+	// Auto-saved on change — no separate button, so "选了就记住". We set the changed
+	// value explicitly (not relying on bind:value's timing vs this handler) so the PUT
+	// never sends a stale selection.
+	async function saveModelChoice(which: 'fanout' | 'synth', value: string) {
+		if (which === 'fanout') fanoutModel = value;
+		else synthModel = value;
+		if (!activeChannelId) return; // env fallback without a channel — nothing to persist to
+		modelsMsg = '';
+		try {
+			const r = await fetch(`/api/channels/${activeChannelId}`, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ fanoutModel, synthModel })
+			});
+			modelsMsg = r.ok ? '已记住模型选择' : `保存失败：HTTP ${r.status}`;
+			if (r.ok) loadChannels(); // keep client channel state in sync (silent)
+		} catch {
+			modelsMsg = '保存失败：无法连接本地服务';
+		}
+	}
+
+	// Quick-switch the active channel from the composer popup (no need to open the
+	// full modal). Reloads models so the fanout/synth pickers reflect the new channel.
+	async function activateChannel(id: string) {
+		if (!id || id === activeChannelId) return;
+		activeChannelId = id;
+		modelsMsg = '';
+		try {
+			await fetch('/api/channels/active', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ id })
+			});
+			loadModels();
+			loadChannels();
+		} catch {
+			/* ignore — a reload reflects server truth */
+		}
+	}
+
+	// Information-source region — read once on mount, persisted on change (like the model
+	// picker: "选了就记住"), so it survives refreshes. Server default is 'mixed'.
+	async function loadRegion() {
+		try {
+			const r = await fetch('/api/settings/region');
+			if (!r.ok) return;
+			const d = await r.json();
+			sourceRegion = d.region === 'domestic' || d.region === 'foreign' ? d.region : 'mixed';
+		} catch {
+			/* not fatal */
+		}
+	}
+
+	async function saveRegion(value: string) {
+		sourceRegion = value === 'domestic' || value === 'foreign' ? value : 'mixed';
+		regionMsg = '';
+		try {
+			const r = await fetch('/api/settings/region', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ region: sourceRegion })
+			});
+			regionMsg = r.ok ? '已记住信息源区域' : `保存失败：HTTP ${r.status}`;
+		} catch {
+			regionMsg = '保存失败：无法连接本地服务';
+		}
+	}
 
 	function onChannelsChanged() {
 		loadModels();
@@ -203,17 +346,34 @@
 		}
 	}
 
-	async function replayWorkflow(slug: string) {
-		if (!question.trim()) return;
+	async function removeWorkflow(slug: string, name: string) {
+		if (!confirm(`删除工作流「${name}」？此操作不可撤销。`)) return;
+		replayHint = '';
+		try {
+			const r = await fetch(`/api/workflows?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+			if (r.ok) {
+				workflows = workflows.filter((w) => w.slug !== slug);
+			} else {
+				replayHint = `删除失败：HTTP ${r.status}`;
+			}
+		} catch {
+			replayHint = '删除失败：无法连接本地服务';
+		}
+	}
+
+	// Load a saved workflow into the editor: fill the question box with its saved last
+	// question, pre-populate the plan (dimensions/sources as last selected), and park at
+	// awaiting_edit so the user reviews and clicks 开始搜索. Does NOT auto-search.
+	async function openWorkflow(slug: string) {
+		replayHint = '';
 		resetRun();
-		phase = 'searching';
 		settingsOpen = false;
 		let r: Response;
 		try {
 			r = await fetch('/api/workflows/replay', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ workflow: slug, question, fanoutModel, synthModel })
+				body: JSON.stringify({ workflow: slug, fanoutModel, synthModel })
 			});
 		} catch {
 			phase = 'error';
@@ -222,14 +382,16 @@
 		}
 		if (!r.ok) {
 			phase = 'error';
-			errorMsg = `回放失败：HTTP ${r.status}`;
+			errorMsg = `载入失败：HTTP ${r.status}`;
 			return;
 		}
 		const data = await r.json();
 		runId = data.id;
 		plan = data.plan;
+		question = data.question ?? question; // 填入工作流保存的上次搜索内容
 		searchMode = data.mode ?? 'report';
-		phase = 'searching';
+		phase = 'awaiting_edit'; // 落到可编辑计划，等用户确认后点「开始搜索」
+		// Open the SSE stream now (like start() does) so 开始搜索 → runIt receives progress.
 		listen(data.id);
 	}
 
@@ -365,6 +527,20 @@
 	function removeSource(di: number, i: number) {
 		plan!.dimensions[di].sources.splice(i, 1);
 	}
+	// Community targets share one keyword query — editing it updates every target in the dim.
+	function setCommunityKeywords(di: number, value: string) {
+		for (const s of plan!.dimensions[di].sources) s.query = value;
+	}
+	const TARGET_KIND_LABEL: Record<string, string> = {
+		subreddit: '社区',
+		hn: 'HN',
+		domain: '网站',
+		web: '开放网络',
+		writing: '他人写作'
+	};
+	const targetKindLabel = (kind?: string) => TARGET_KIND_LABEL[kind ?? ''] ?? '网站';
+	// Broad, low-trust escape-hatch sources (open web / Exa) — shown below the vetted picks.
+	const isBroad = (kind?: string) => kind === 'web' || kind === 'writing';
 </script>
 
 <div class="wrap">
@@ -372,9 +548,12 @@
 		<div class="topbar">
 			<div class="brand">
 				<span class="mark"><i class="ph ph-magnifying-glass"></i></span> 万能搜索
-				<span class="sub">/ 搜索并沉淀知识</span>
+				<span class="sub">/ 搜索并保存知识</span>
 			</div>
 			<div class="tools">
+				<button class="iconbtn" onclick={() => (onboardingOpen = true)} title="新手引导" aria-label="新手引导">
+					<i class="ph ph-question"></i>
+				</button>
 				<button class="iconbtn" onclick={toggleMode} title="深 / 浅" aria-label="切换深浅模式">
 					<i class="ph {mode === 'dark' ? 'ph-sun' : 'ph-moon'}"></i>
 				</button>
@@ -389,10 +568,21 @@
 							style="position:fixed;inset:0;z-index:20;background:transparent;border:none;cursor:default"
 						></button>
 						<div class="pop">
-							<h3><i class="ph ph-gear-six"></i> 模型设置</h3>
+							<h3><i class="ph ph-gear-six"></i> 设置</h3>
 							<p class="note">{activeChannelName ? `当前渠道：${activeChannelName}` : '尚未配置 AI 渠道'}</p>
 							{#if providerHost}
 								<div class="provider">提供商主机 <b>{providerHost}</b></div>
+							{/if}
+							{#if channels.length > 1}
+								<div class="grp">
+									<label class="fld" for="ch-active">当前渠道（快捷切换）</label>
+									<div class="selrow">
+										<select id="ch-active" value={activeChannelId} onchange={(e) => activateChannel(e.currentTarget.value)}>
+											{#each channels as c}<option value={c.id}>{c.name}</option>{/each}
+										</select>
+										<i class="ph ph-caret-down caret"></i>
+									</div>
+								</div>
 							{/if}
 							<button
 								class="btn btn-ghost"
@@ -408,7 +598,7 @@
 								<div class="grp">
 									<label class="fld" for="fanout">铺广度模型（便宜 · 提查询/压缩/打标签）</label>
 									<div class="selrow">
-										<select id="fanout" bind:value={fanoutModel}>
+										<select id="fanout" bind:value={fanoutModel} onchange={(e) => saveModelChoice('fanout', e.currentTarget.value)}>
 											{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
 										</select>
 										<i class="ph ph-caret-down caret"></i>
@@ -417,13 +607,40 @@
 								<div class="grp">
 									<label class="fld" for="synth">收口模型（强 · 综合报告）</label>
 									<div class="selrow">
-										<select id="synth" bind:value={synthModel}>
+										<select id="synth" bind:value={synthModel} onchange={(e) => saveModelChoice('synth', e.currentTarget.value)}>
 											{#each models?.models ?? [] as m}<option value={m}>{m}</option>{/each}
 										</select>
 										<i class="ph ph-caret-down caret"></i>
 									</div>
 								</div>
+								<p class="note" style="margin:-4px 0 13px">{modelsMsg || '选择即自动记住（保存到当前渠道）'}</p>
 							{/if}
+							<div class="grp">
+								<label class="fld" for="src-region">信息源来源</label>
+								<div class="selrow">
+									<select id="src-region" value={sourceRegion} onchange={(e) => saveRegion(e.currentTarget.value)}>
+										<option value="mixed">混合（国内 + 国外）</option>
+										<option value="domestic">国内</option>
+										<option value="foreign">国外</option>
+									</select>
+									<i class="ph ph-caret-down caret"></i>
+								</div>
+								<p class="note" style="margin:6px 0 13px">{regionMsg || '限定信息源区域：影响生成维度与所选社区/网站'}</p>
+							</div>
+							<div class="grp">
+								<label class="fld" for="savedir">保存目录（报告写入此处）</label>
+								<input id="savedir" type="text" bind:value={saveDirInput} placeholder="/Users/you/research" />
+							</div>
+							<div class="row" style="justify-content:space-between;margin-bottom:13px">
+								{#if saveDirMsg}
+									<span class="test-msg" class:ok={saveDirOk} class:fail={saveDirOk === false}>{saveDirMsg}</span>
+								{:else}
+									<span class="dim" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{saveDir || '尚未设置'}</span>
+								{/if}
+								<button class="btn btn-ghost" onclick={saveSaveDir} disabled={savingDir}>
+									{#if savingDir}<span class="spin"></span> 保存中…{:else}保存目录{/if}
+								</button>
+							</div>
 							<button class="btn btn-soft" style="width:100%;justify-content:center" onclick={() => (settingsOpen = false)}>完成</button>
 						</div>
 					{/if}
@@ -459,25 +676,26 @@
 				</button>
 			{/if}
 
-			<!-- 已存工作流：输入问题后可直接回放（跳过提问/编辑计划） -->
+			<!-- 已存工作流：点击载入上次问题 + 维度到可编辑计划，确认后再搜索 -->
 			{#if phase === 'idle' && workflows.length}
 				<div class="plan-head">
 					<h2>已存工作流</h2>
-					<span class="dim">回放跳过「提问→编辑计划」，直接并行搜索</span>
+					<span class="dim" class:hint={replayHint}>{replayHint || '点击载入上次问题与维度到计划，确认后再搜索'}</span>
 				</div>
 				<div style="display:flex;flex-direction:column;gap:8px">
 					{#each workflows as wf (wf.slug)}
-						<button
-							class="btn btn-ghost"
-							style="justify-content:flex-start;gap:10px;text-align:left"
-							onclick={() => replayWorkflow(wf.slug)}
-							disabled={!question.trim()}
-							title={question.trim() ? '用上面的问题回放此工作流' : '先输入问题再回放'}
-						>
-							<i class="ph {wf.mode === 'github' ? 'ph-github-logo' : 'ph-lightning'}"></i>
-							<span style="font-weight:600">{wf.name}</span>
-							<span class="dim" style="margin-left:auto;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{wf.questionPattern}</span>
-						</button>
+						<div class="wf-row">
+							<button
+								class="btn btn-ghost wf-replay"
+								onclick={() => openWorkflow(wf.slug)}
+								title="载入此工作流：填入上次问题与维度，确认后搜索"
+							>
+								<i class="ph {wf.mode === 'github' ? 'ph-github-logo' : 'ph-lightning'}"></i>
+								<span style="font-weight:600">{wf.name}</span>
+								<span class="dim wf-pattern">{wf.questionPattern}</span>
+							</button>
+							<button class="del" onclick={() => removeWorkflow(wf.slug, wf.name)} title="删除此工作流" aria-label="删除此工作流"><i class="ph ph-trash"></i></button>
+						</div>
 					{/each}
 				</div>
 			{/if}
@@ -490,23 +708,56 @@
 					<span class="dim">勾选启用 · 直接改写查询 · 可增删</span>
 				</div>
 				{#each plan.dimensions as dim, di (dim.key)}
-					<div class="dim-group" style={dim.enabled ? '' : 'opacity:.55'}>
-						<div class="dim-head">
-							<button class="tgl" class:off={!dim.enabled} onclick={() => (dim.enabled = !dim.enabled)} aria-label="启用或停用此维度"></button>
-							<span class="dim-name">{dim.label}</span>
-							<span class="dim">{dim.sources.length} 个源</span>
-						</div>
-						{#each dim.sources as s, i (s.id)}
-							<div class="src">
-								<i class="ph ph-dots-six-vertical grip"></i>
-								<button class="tgl" class:off={!s.enabled} onclick={() => (s.enabled = !s.enabled)} aria-label="启用或停用此源"></button>
-								<input type="text" bind:value={s.query} style={s.enabled ? '' : 'color:var(--ink-3)'} />
-								<span class="badge-api">{s.api}</span>
-								<button class="del" onclick={() => removeSource(di, i)} aria-label="删除"><i class="ph ph-x"></i></button>
+					{#if dim.key === 'community'}
+						<!-- 搜索来源：统一护栏选择器（精选默认选中前 3；开放网络等宽泛来源默认关闭） -->
+						<div class="dim-group" style={dim.enabled ? '' : 'opacity:.55'}>
+							<div class="dim-head">
+								<button class="tgl" class:off={!dim.enabled} onclick={() => (dim.enabled = !dim.enabled)} aria-label="启用或停用此维度"></button>
+								<span class="dim-name">{dim.label}</span>
+								<span class="dim">AI 只读你勾选的来源 · 精选默认选中前 3</span>
 							</div>
-						{/each}
-						<button class="btn btn-ghost" onclick={() => addSource(di)}><i class="ph ph-plus"></i> 添加搜索源</button>
-					</div>
+							<div class="comm-kw">
+								<i class="ph ph-magnifying-glass"></i>
+								<input
+									type="text"
+									value={dim.sources[0]?.query ?? ''}
+									placeholder="搜索关键词（应用于下列所有来源）"
+									oninput={(e) => setCommunityKeywords(di, e.currentTarget.value)}
+									aria-label="搜索来源关键词"
+								/>
+							</div>
+							{#each dim.sources as s, i (s.id)}
+								{#if isBroad(s.target?.kind) && !isBroad(dim.sources[i - 1]?.target?.kind)}
+										<div class="comm-divider"><i class="ph ph-warning"></i> 宽泛来源（低信任，谨慎开启）</div>
+									{/if}
+									<div class="src comm-target" class:low-trust={isBroad(s.target?.kind)} style={s.enabled ? '' : 'opacity:.55'}>
+									<button class="tgl" class:off={!s.enabled} onclick={() => (s.enabled = !s.enabled)} aria-label="选中或取消此来源"></button>
+									<span class="comm-name">{s.label ?? s.target?.value ?? s.query}</span>
+									<span class="badge-kind kind-{s.target?.kind ?? 'domain'}">{targetKindLabel(s.target?.kind)}</span>
+									{#if s.scoreLabel}<span class="badge-score">{s.scoreLabel}</span>{/if}
+									<button class="del" onclick={() => removeSource(di, i)} aria-label="删除"><i class="ph ph-x"></i></button>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="dim-group" style={dim.enabled ? '' : 'opacity:.55'}>
+							<div class="dim-head">
+								<button class="tgl" class:off={!dim.enabled} onclick={() => (dim.enabled = !dim.enabled)} aria-label="启用或停用此维度"></button>
+								<span class="dim-name">{dim.label}</span>
+								<span class="dim">{dim.sources.length} 个源</span>
+							</div>
+							{#each dim.sources as s, i (s.id)}
+								<div class="src">
+									<i class="ph ph-dots-six-vertical grip"></i>
+									<button class="tgl" class:off={!s.enabled} onclick={() => (s.enabled = !s.enabled)} aria-label="启用或停用此源"></button>
+									<input type="text" bind:value={s.query} style={s.enabled ? '' : 'color:var(--ink-3)'} />
+									<span class="badge-api">{s.api}</span>
+									<button class="del" onclick={() => removeSource(di, i)} aria-label="删除"><i class="ph ph-x"></i></button>
+								</div>
+							{/each}
+							<button class="btn btn-ghost" onclick={() => addSource(di)}><i class="ph ph-plus"></i> 添加搜索源</button>
+						</div>
+					{/if}
 				{/each}
 				<div class="toolbar-between">
 					<span class="dim"></span>
@@ -543,7 +794,7 @@
 					</li>
 					<li>
 						<span class="dot {phase === 'depositing' ? 'run' : 'wait'}">4</span>
-						<div class="t">沉淀进第二大脑</div>
+						<div class="t">保存到目录</div>
 						<div class="m">需你确认后写入</div>
 					</li>
 				</ul>
@@ -556,6 +807,7 @@
 				bind:reportView
 				{rawCount}
 				{willWritePath}
+				{saveDir}
 				{reportPath}
 				{depositing}
 				{savingWorkflow}
@@ -590,4 +842,15 @@
 
 {#if channelsOpen}
 	<ChannelSettings onClose={() => (channelsOpen = false)} onChanged={onChannelsChanged} />
+{/if}
+
+{#if onboardingOpen}
+	<OnboardingWizard
+		onClose={() => (onboardingOpen = false)}
+		onChannelsChanged={onChannelsChanged}
+		onSaveDirChanged={(d) => {
+			saveDir = d;
+			saveDirInput = d;
+		}}
+	/>
 {/if}

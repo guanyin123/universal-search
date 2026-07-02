@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { PROVIDER_PRESETS, type ProviderPreset } from './providers';
 
 	type ChannelPublic = {
 		id: string;
@@ -25,11 +26,20 @@
 	let editing = $state<null | { id?: string }>(null);
 	let form = $state({ name: '', baseURL: '', apiKey: '', models: '', fanoutModel: '', synthModel: '' });
 	let keyPlaceholder = $state('sk-...');
+	let showKey = $state(false); // 明文/密文切换
+	let docsUrl = $state(''); // 当前预设的「获取密钥」链接
+	let docsName = $state('');
+	let logoFailed = $state(new Set<string>()); // logo 加载失败 → 回退字母徽章
 	let testing = $state(false);
 	let testMsg = $state('');
 	let testOk = $state<boolean | null>(null);
 	let saving = $state(false);
 	let errMsg = $state('');
+
+	// 铺广度/收口下拉的候选（来自「可用模型」文本框）
+	const modelOpts = $derived(
+		form.models.split(',').map((m) => m.trim()).filter(Boolean)
+	);
 
 	onMount(load);
 
@@ -53,6 +63,32 @@
 		testMsg = '';
 		testOk = null;
 		errMsg = '';
+		showKey = false;
+		docsUrl = '';
+		docsName = '';
+	}
+
+	// Fill the form from a known-provider preset (base_url/models/defaults). The key is
+	// left for the user to paste; local providers (Ollama) get a dummy so save passes.
+	// Custom base_url is preserved — every field stays editable below.
+	function applyPreset(p: ProviderPreset) {
+		form.name = p.name;
+		form.baseURL = p.baseURL;
+		form.models = p.models.join(', ');
+		form.fanoutModel = p.fanout ?? '';
+		form.synthModel = p.synth ?? '';
+		if (p.noKey) form.apiKey = 'ollama';
+		resetFormState();
+		keyPlaceholder = p.keyHint ?? 'sk-...';
+		docsUrl = p.docsUrl ?? '';
+		docsName = p.name;
+	}
+
+	// "自定义" card — blank slate for a fully custom base_url.
+	function applyCustom() {
+		form = { name: '', baseURL: '', apiKey: '', models: '', fanoutModel: '', synthModel: '' };
+		resetFormState();
+		keyPlaceholder = 'sk-...';
 	}
 
 	function startCreate() {
@@ -237,6 +273,26 @@
 		{#if editing}
 			<div class="ch-form">
 				<div class="ch-form-head">{editing.id ? '编辑渠道' : '新增渠道'}</div>
+
+				<!-- 知名渠道快捷选择：点一下填好 base_url + 模型，再粘贴密钥即可 -->
+				<div class="preset-label">选择知名渠道快速填入，或点「自定义」手动配置</div>
+				<div class="preset-grid">
+					{#each PROVIDER_PRESETS as p (p.id)}
+						<button class="preset-card" onclick={() => applyPreset(p)} title={p.baseURL}>
+							{#if logoFailed.has(p.id)}
+								<span class="preset-mono" style="background:{p.color}">{p.short}</span>
+							{:else}
+								<img class="preset-logo" src="/providers/{p.id}.svg" alt="" onerror={() => logoFailed.add(p.id)} />
+							{/if}
+							<span class="preset-name">{p.name}</span>
+						</button>
+					{/each}
+					<button class="preset-card custom" onclick={applyCustom} title="自定义 base_url">
+						<span class="preset-icon"><i class="ph ph-sliders-horizontal"></i></span>
+						<span class="preset-name">自定义</span>
+					</button>
+				</div>
+
 				<div class="grp">
 					<label class="fld" for="ch-name">名称</label>
 					<input id="ch-name" type="text" bind:value={form.name} placeholder="如：OpenAI / 本地 Ollama / 中转站" />
@@ -247,10 +303,18 @@
 				</div>
 				<div class="grp">
 					<label class="fld" for="ch-key">密钥</label>
-					<input id="ch-key" type="password" bind:value={form.apiKey} placeholder={keyPlaceholder} autocomplete="off" />
+					<div class="key-field">
+						<input id="ch-key" type={showKey ? 'text' : 'password'} bind:value={form.apiKey} placeholder={keyPlaceholder} autocomplete="off" />
+						<button class="key-eye" type="button" onclick={() => (showKey = !showKey)} aria-label={showKey ? '隐藏密钥' : '显示密钥'} title={showKey ? '隐藏' : '显示'}>
+							<i class="ph {showKey ? 'ph-eye-slash' : 'ph-eye'}"></i>
+						</button>
+					</div>
+					{#if docsUrl}
+						<a class="key-docs" href={docsUrl} target="_blank" rel="noopener noreferrer">没有密钥？前往 {docsName} 获取 <i class="ph ph-arrow-up-right"></i></a>
+					{/if}
 				</div>
-				<div class="grp">
-					<button class="btn btn-soft" onclick={test} disabled={testing}>
+				<div class="grp test-row">
+					<button class="btn btn-test" onclick={test} disabled={testing}>
 						{#if testing}<span class="spin"></span> 测试中…{:else}<i class="ph ph-plugs"></i> 测试连接{/if}
 					</button>
 					{#if testMsg}
@@ -261,14 +325,17 @@
 					<label class="fld" for="ch-models">可用模型（逗号分隔 · 「测试连接」可自动填充）</label>
 					<input id="ch-models" type="text" bind:value={form.models} placeholder="gpt-4o, gpt-4o-mini" />
 				</div>
+				<datalist id="ch-model-opts">
+					{#each modelOpts as m}<option value={m}></option>{/each}
+				</datalist>
 				<div class="ch-form-row">
 					<div class="grp">
 						<label class="fld" for="ch-fanout">铺广度模型（可选）</label>
-						<input id="ch-fanout" type="text" bind:value={form.fanoutModel} placeholder="留空用列表首个" />
+						<input id="ch-fanout" type="text" list="ch-model-opts" bind:value={form.fanoutModel} placeholder="选择或输入 · 留空用列表首个" />
 					</div>
 					<div class="grp">
 						<label class="fld" for="ch-synth">收口模型（可选）</label>
-						<input id="ch-synth" type="text" bind:value={form.synthModel} placeholder="留空用列表首个" />
+						<input id="ch-synth" type="text" list="ch-model-opts" bind:value={form.synthModel} placeholder="选择或输入 · 留空用列表首个" />
 					</div>
 				</div>
 				{#if errMsg}<div class="note-line warn"><i class="ph ph-warning-circle"></i> {errMsg}</div>{/if}

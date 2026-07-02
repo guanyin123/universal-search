@@ -1,4 +1,4 @@
-import type { DimensionKey, SourceApi, RunMode } from '../runs/types';
+import type { DimensionKey, SourceApi, RunMode, CommunityTarget } from '../runs/types';
 
 /** A reusable search source — a query template (may contain the {{question}}
  *  placeholder) bound to a dimension + API. */
@@ -6,6 +6,12 @@ export interface WorkflowSource {
   dimension: DimensionKey;
   api: SourceApi;
   query: string;
+  /** Community dimension: the named target + scoring metadata, carried so a replay
+   *  re-targets the same subreddit / HN / website rather than searching broadly. */
+  target?: CommunityTarget;
+  label?: string;
+  scoreLabel?: string;
+  score?: number;
 }
 
 /** The dimension-level metadata of a workflow (its sources live in `sources`,

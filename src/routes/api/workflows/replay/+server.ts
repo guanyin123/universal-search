@@ -1,23 +1,26 @@
 import { json, error } from '@sveltejs/kit';
-import { getConfig } from '$lib/server/runtime-config';
-import { resolveLlmConfig } from '$lib/server/settings';
+import { resolveLlmConfig, getSaveDir } from '$lib/server/settings';
 import { realDeps } from '$lib/server/runs/deps';
-import { bus } from '$lib/server/events';
-import { hydrateReplay, runPlan, runGithubSearch } from '$lib/server/runs/machine';
+import { hydrateReplay } from '$lib/server/runs/machine';
 import { loadWorkflow } from '$lib/server/workflows/store';
-import { makeWorkflowSynthPrompt } from '$lib/server/workflows/build';
+import { workflowQuestion } from '$lib/server/workflows/build';
 
-/** Replay a stored workflow against a new question — skips propose + awaiting_edit. */
+/**
+ * Prepare an editable run from a stored workflow: hydrate its saved plan + last
+ * question into a run parked at `awaiting_edit`, WITHOUT starting the search. The client
+ * fills the question box + renders the pre-filled plan; the user reviews and clicks
+ * 开始搜索 (→ POST /api/run/[id]/plan) to actually run.
+ */
 export async function POST({ request }) {
   const body = await request.json().catch(() => ({}));
   const slug = (body.workflow ?? '').toString();
-  const question = (body.question ?? '').toString().trim();
   if (!slug) throw error(400, 'workflow is required');
-  if (!question) throw error(400, 'question is required');
 
-  const cfg = getConfig();
-  const workflow = await loadWorkflow(cfg.vaultRoot, slug);
+  const workflow = await loadWorkflow(getSaveDir(), slug);
   if (!workflow) throw error(404, `workflow not found: ${slug}`);
+
+  // Default to the workflow's saved last question; allow an explicit override.
+  const question = (body.question ?? '').toString().trim() || workflowQuestion(workflow);
 
   // resolveLlmConfig()/realDeps() throw when no channel (or env fallback) exists.
   let llm, deps;
@@ -31,12 +34,6 @@ export async function POST({ request }) {
     fanout: body.fanoutModel || workflow.modelConfig.fanout || llm.fanoutModel,
     synth: body.synthModel || workflow.modelConfig.synth || llm.synthModel
   };
-  const run = await hydrateReplay(workflow, { question, models }, deps);
-  // Kick off the tail async (dispatched on the workflow's mode); the client watches over SSE.
-  if ((workflow.mode ?? 'report') === 'github') {
-    runGithubSearch(run.id, run.plan, deps, bus).catch(() => {});
-  } else {
-    runPlan(run.id, run.plan, deps, bus, { buildSynthPrompt: makeWorkflowSynthPrompt(workflow) }).catch(() => {});
-  }
-  return json({ id: run.id, status: run.status, mode: run.mode, plan: run.plan });
+  const run = await hydrateReplay(workflow, { question, models }, deps, { status: 'awaiting_edit' });
+  return json({ id: run.id, status: run.status, mode: run.mode, plan: run.plan, question: run.question });
 }

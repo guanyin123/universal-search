@@ -42,3 +42,41 @@ export function getSettings(): SettingsStore {
 export function resolveLlmConfig(): LlmRuntimeConfig {
   return resolveLlmConfigFrom(getSettings(), getConfig().llm);
 }
+
+/** app_settings key for the user-chosen save directory (replaces the hard-coded vault). */
+const SAVE_DIR_KEY = 'save_dir';
+
+/**
+ * The effective directory reports/workflows are saved into: the in-app setting,
+ * falling back to the optional `VAULT_ROOT` env (back-compat with the author's own
+ * branch), else `''` (unset → callers surface a "未配置保存目录" error).
+ */
+export function getSaveDir(): string {
+  const stored = getSettings().getSetting(SAVE_DIR_KEY);
+  if (stored && stored.trim()) return stored.trim();
+  return getConfig().vaultRoot ?? '';
+}
+
+/** Persist the user-chosen save directory (in-app setting). */
+export function setSaveDir(dir: string): void {
+  getSettings().setSetting(SAVE_DIR_KEY, dir.trim());
+}
+
+/** Which region a report's sources should be drawn from: 国内 / 国外 / 混合. Biases
+ *  dimension proposal + community/site picking; see pipeline/community-targets.ts. */
+export type SourceRegion = 'domestic' | 'foreign' | 'mixed';
+
+/** app_settings key for the user-chosen information-source region. */
+const SOURCE_REGION_KEY = 'source_region';
+
+/** The effective source region, defaulting to 'mixed' (both domestic + foreign) so
+ *  existing behavior is unchanged until the user opts into 国内/国外. */
+export function getSourceRegion(): SourceRegion {
+  const v = getSettings().getSetting(SOURCE_REGION_KEY);
+  return v === 'domestic' || v === 'foreign' ? v : 'mixed';
+}
+
+/** Persist the user-chosen information-source region (in-app setting). */
+export function setSourceRegion(region: SourceRegion): void {
+  getSettings().setSetting(SOURCE_REGION_KEY, region);
+}

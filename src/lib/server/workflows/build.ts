@@ -58,7 +58,13 @@ export function buildWorkflowDoc(run: Run, opts: { name?: string; id?: string } 
     if (enabledSources.length === 0) continue;
     dimensions.push({ key: dim.key, label: dim.label });
     for (const s of enabledSources) {
-      sources.push({ dimension: dim.key, api: s.api, query: templatizeQuery(s.query, run.question) });
+      sources.push({
+        dimension: dim.key,
+        api: s.api,
+        query: templatizeQuery(s.query, run.question),
+        // Carry the community target so a replay re-searches the same named target.
+        ...(s.target ? { target: s.target, label: s.label, scoreLabel: s.scoreLabel, score: s.score } : {})
+      });
     }
   }
 
@@ -80,6 +86,14 @@ export function buildWorkflowDoc(run: Run, opts: { name?: string; id?: string } 
   };
 }
 
+/**
+ * The question to prefill when a workflow is loaded into the editor: its most recent
+ * run's question, falling back to the canonical pattern. This is the "上次搜索内容".
+ */
+export function workflowQuestion(doc: WorkflowDoc): string {
+  return doc.runHistory.at(-1)?.question || doc.questionPattern;
+}
+
 /** Hydrate a workflow + new question into a concrete RunPlan (skips proposing). */
 export function planFromWorkflow(workflow: WorkflowDoc, question: string): RunPlan {
   const dimensions: PlanDimension[] = workflow.dimensions.map((d) => {
@@ -89,7 +103,8 @@ export function planFromWorkflow(workflow: WorkflowDoc, question: string): RunPl
         id: `${d.key}-${i + 1}`,
         api: s.api,
         query: hydrateQuery(s.query, question),
-        enabled: true
+        enabled: true,
+        ...(s.target ? { target: s.target, label: s.label, scoreLabel: s.scoreLabel, score: s.score } : {})
       }));
     return { key: d.key, label: d.label, enabled: true, sources };
   });
